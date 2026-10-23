@@ -55,6 +55,11 @@ try {
       [A.themeAttr, A.theme]), 4000);
     mark('theme');
   }
+  if (A.steps.length) {
+    const state = (await step('state', page.evaluate(A.recipe), 8000)).value;
+    if (state && state.error) throw new Error(`state recipe step ${state.done + 1}: ${state.error}`);
+    mark('state');
+  }
   await step('options', page.evaluate((m) => { window.SPINE_DESIGN_OPTIONS = { mask: m }; }, A.mask), 4000);
   const length = (await step('extract', page.evaluate(
     "window.__spineDesignResult = JSON.stringify(" + A.script + "); return window.__spineDesignResult.length;"),
@@ -129,10 +134,14 @@ def _script_expression() -> str:
 
 
 def build_run_code(url: str, viewport: tuple[int, int] | None, theme: str | None, theme_attr: str | None,
-                   color_scheme: str | None, wait_for: str, pixels: bool, mask: list[str] | None = None) -> str:
+                   color_scheme: str | None, wait_for: str, pixels: bool, mask: list[str] | None = None,
+                   steps: list[dict[str, Any]] | None = None) -> str:
+    from .recipes import run_expression
+
     args = {
         "url": url, "viewport": list(viewport) if viewport else None, "theme": theme, "themeAttr": theme_attr,
-        "mask": list(mask or []),
+        "mask": list(mask or []), "steps": list(steps or []),
+        "recipe": run_expression(list(steps or [])),
         "colorScheme": color_scheme, "waitFor": wait_for, "pixels": pixels, "script": _script_expression(),
         # Leave headroom under BrowserOS's hard 30 s cap: skip the screenshot rather than lose everything.
         "budgetMs": 25000,
@@ -183,11 +192,11 @@ async def _capture(endpoint: str, code: str) -> dict[str, Any]:
 def capture(url: str, viewport: tuple[int, int] | None = None, theme: str | None = None,
             theme_attr: str | None = "data-theme", color_scheme: str | None = None,
             wait_for: str = "body", pixels: bool = True, mask: list[str] | None = None,
-            endpoint: str | None = None) -> Capture:
+            steps: list[dict[str, Any]] | None = None, endpoint: str | None = None) -> Capture:
     """Capture one view through BrowserOS neo. Runs its own event loop, so call it
     from a worker thread when already inside one (the MCP server does)."""
     endpoint = endpoint or os.environ.get("SPINE_BROWSEROS_URL", DEFAULT_URL)
-    code = build_run_code(url, viewport, theme, theme_attr, color_scheme, wait_for, pixels, mask)
+    code = build_run_code(url, viewport, theme, theme_attr, color_scheme, wait_for, pixels, mask, steps)
     value = None
     for attempt in (1, 2):
         try:

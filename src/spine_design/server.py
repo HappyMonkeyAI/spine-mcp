@@ -90,7 +90,7 @@ async def get_capture(
 async def diff_captures(
     project: str | None = None,
     view: str | None = None,
-    a: str = "previous",
+    a: str = "auto",
     b: str = "latest",
     threshold: float = 0.02,
 ) -> dict[str, Any]:
@@ -149,6 +149,15 @@ async def check_design(project: str | None = None, view: str | None = None) -> d
     DESIGN.md component's measured styles vs its spec (needs a [components] mapping or
     data-component hooks). Facts with counts, not judgements."""
     return tools.check_design(_project(project), view)
+
+
+@mcp.tool()
+async def approve_baseline(agent: str, project: str | None = None, view: str | None = None,
+                           which: str = "latest", note: str = "") -> dict[str, Any]:
+    """Approve a capture as the view's baseline: the reference diff_captures compares
+    against by default. Writes .agent/design/baselines/<view>.{json,webp} and
+    inventory.json, which are tracked in git and size-capped. Say why in `note`. Uncommitted."""
+    return tools.approve_baseline(_project(project), agent, view, which, note)
 
 
 @mcp.resource("spine-design://extract.js")

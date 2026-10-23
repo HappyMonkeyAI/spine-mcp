@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
 
     dif = sub.add_parser("diff")
     dif.add_argument("--view")
-    dif.add_argument("-a", default="previous")
+    dif.add_argument("-a", default="auto", help="auto = the approved baseline if there is one, else the previous capture")
     dif.add_argument("-b", default="latest")
     dif.add_argument("--threshold", type=float, default=0.02)
 
@@ -60,6 +60,12 @@ def main(argv: list[str] | None = None) -> int:
 
     chk = sub.add_parser("check", help="compare the running UI with DESIGN.md")
     chk.add_argument("--view")
+
+    apr = sub.add_parser("approve", help="approve a capture as the view's baseline (tracked)")
+    apr.add_argument("--agent", required=True)
+    apr.add_argument("--view")
+    apr.add_argument("--which", default="latest")
+    apr.add_argument("--note", default="")
 
     fgt = sub.add_parser("forget")
     fgt.add_argument("--view")
@@ -92,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
                                        args.state, args.force, args.url))
         elif args.command == "check":
             _json(tools.check_design(args.project, args.view))
+        elif args.command == "approve":
+            _json(tools.approve_baseline(args.project, args.agent, args.view, args.which, args.note))
         elif args.command == "forget":
             _json(tools.forget(args.project, args.view, args.before, args.everything))
     except (SpinePathError, SpineWriteError, imaging.ImageError, OSError) as exc:

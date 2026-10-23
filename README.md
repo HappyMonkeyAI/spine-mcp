@@ -12,7 +12,7 @@ uncommitted for you to commit with the work. The index is a self-ignoring cache 
 
 ## Status
 
-**Spine: slices S1 (read) and S2 (write) built. Spine Design: slices D1 and D2 built.** S3 (proxy catalogue, registry resolution,
+**Spine: slices S1 (read) and S2 (write) built. Spine Design: slices D1–D3 built.** S3 (proxy catalogue, registry resolution,
 protocol ADR) is next.
 
 Measured on MRPGRealms (2026-10-23): brief ~2.4k tokens vs ~10k for protocol
@@ -141,7 +141,7 @@ block on error. Other agents get the same behaviour from the snippet above.
 }
 ```
 
-## Spine Design (second server, slices D1–D2)
+## Spine Design (second server, slices D1–D3)
 
 Visual memory and inventory for a project's running UI. It stores captures with history,
 measures design tokens and components from the live DOM, and diffs captures. Answers are
@@ -158,6 +158,7 @@ Mount `uv run --project <spine-mcp> spine-design-mcp` the same way as Spine.
 | `record_capture(agent, extraction, project, route?, viewport?, theme?, state?, image_path?, image_base64?)` | Store a capture. The screenshot is optional: measurements alone give tokens, components and style diffs. |
 | `get_capture(project, view?, which?, include_image?, crop?)` | Measurements and freshness. With `include_image`, a cropped, downscaled webp. |
 | `diff_captures(project, view?, a?, b?, threshold?)` | Changed regions (with the components under them), token use shifts, component style changes, UI source files changed. |
+| `approve_baseline(agent, project, view?, which?, note?)` | Approve a capture as the view's reference: `.agent/design/baselines/` plus `inventory.json`, tracked and size-capped. Diffs compare against it by default. |
 | `tokens` / `components` / `forget` | Detail, inventory (with `spine-design.toml` mapping to `DESIGN.md` names), retention. |
 
 **Capturing, by browser:**
@@ -165,7 +166,8 @@ Mount `uv run --project <spine-mcp> spine-design-mcp` the same way as Spine.
 | Agent's browser | How |
 |---|---|
 | Playwright MCP / chrome-devtools MCP (save files) | evaluate `extraction_script` with `filename=...json`, take a screenshot with `filename=...png`, then `record_capture(extraction=<json path>, image_path=<png>)`. Send the script once and keep it on `window`: the Playwright MCP echoes code back. |
-| BrowserOS neo | Don't capture yourself: call `ensure_capture`. The server drives BrowserOS through its MCP (`SPINE_BROWSEROS_URL`, default `http://127.0.0.1:9010/mcp`). |
+| BrowserOS neo | Don't capture yourself: call `ensure_capture`. The server drives BrowserOS through its MCP (`SPINE_BROWSEROS_URL`, default `http://127.0.0.1:9010/mcp`). Pixels are best-effort, because BrowserOS throttles background tabs. |
+| Headless (CI, Linux, no BrowserOS) | `uv sync --extra playwright`, then `adapter = "playwright"` (or `SPINE_DESIGN_ADAPTER=playwright`) with `browser_channel = "chrome"` / `"msedge"`, or `playwright install chromium`. Deterministic, pixels every time. |
 | Any other | measurements only, the same way |
 
 Captures live in `<project>/.agent/design/cache/`, which ignores itself, is kept per host, and expires after 30 days or 20 per view.
@@ -177,11 +179,19 @@ wait_for = "#root *"                 # selector that means "rendered"
 theme_attr = "data-theme"            # set on <html> per view theme ("" = prefers-color-scheme only)
 mask = [".xterm"]                    # never captured (inputs, canvas, [data-spine-mask] always are)
 pixels = true                        # false = measurements only, no images stored
+adapter = "browseros"                # or "playwright" (headless)
+browser_channel = "chrome"           # playwright: use an installed browser
 # allowed_hosts = ["127.0.0.1", "localhost"]   # ensure_capture refuses anything else
 
 [components]                         # DESIGN.md name -> measured component, for check_design
 session-sidebar = "aside.session-drawer"
+
+[states.history-palette]             # a named state: steps run in the page before measuring
+steps = [ { press = "Control+Shift+R" }, { wait_for = ".palette-layer" } ]
 ```
+
+Actions: `click`, `fill = [sel, value]`, `press = "Control+Shift+R"`, `wait_for`,
+`set_attribute = [sel, attr, value]`, `pause` (≤ 2000 ms). Capture with `ensure_capture(state="history-palette")`.
 
 ## License
 

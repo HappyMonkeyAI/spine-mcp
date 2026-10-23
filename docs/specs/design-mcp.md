@@ -310,8 +310,30 @@ Acceptance:
   divergence from `DESIGN.md`, and the light theme as unspecified. Measured component styles are
   cross-checked by hand on 5 components.
 
-**D3 — baselines and headless capture.** `approve_baseline` + tracked inventory, Playwright
-adapter (incl. Electron `_electron.launch`) for CI and Linux hosts, state recipes.
+**D3 — baselines and headless capture. Built 2026-10-23 (except Electron launch).**
+- **`approve_baseline`:** promotes a capture to `.agent/design/baselines/<view>.{json,webp}` and
+  rewrites `inventory.json`, all tracked and size-capped (150 KB per image, 40 views).
+  - The inventory is written only on approval, so ordinary captures never dirty a tree.
+  - `diff_captures` compares against the baseline by default (`a="auto"`).
+  - A host with no cache still reads baselines.
+- **State recipes** (`[states.<name>] steps = [...]`): click / fill / press / wait_for /
+  set_attribute / pause, strictly validated and run in the page by both adapters. ZeroGTerm's
+  `history-palette` state (Ctrl+Shift+R) opens the command palette. That surfaced drift only
+  visible there: palette radius 7px vs 10px, padding 10px vs 16px.
+- **Playwright adapter** (`adapter = "playwright"` or `SPINE_DESIGN_ADAPTER`): optional extra,
+  using an installed browser via `browser_channel = "chrome"` (no download).
+  - It's deterministic where BrowserOS isn't: about 2 s with pixels, every time.
+  - On ZeroGTerm both adapters measured the same 168 elements and the same palettes.
+
+Learned:
+- **Synthetic key events need `code` as well as `key`.** ZeroGTerm matches shortcuts on `event.code`
+  (`KeyR`), as layout-independent apps do.
+- **A capture's URL leaked page content.** `location.origin + pathname` for a `data:` URL is the
+  whole document, form values included (caught by the live adapter test). extract.js now reports
+  origin + path only for http(s), else just the scheme.
+- **Not done: Electron `_electron.launch`.** ZeroGTerm's renderer measures fine as a plain page
+  (styles are real; only preload APIs are missing). Launching the packaged app needs a build plus
+  node-pty and is left until a view truly needs the preload (sessions, terminals).
 
 **D4 — integration.**
 - Spine's brief gets a 3-line design section (views stale, drift count).

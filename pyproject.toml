@@ -10,6 +10,11 @@ dependencies = [
     "Pillow>=10",     # spine-design: image validation, webp, diffs, crops
 ]
 
+[project.optional-dependencies]
+# spine-design headless adapter (CI / Linux hosts). Use an installed browser via
+# browser_channel = "chrome"|"msedge", or `uv run playwright install chromium`.
+playwright = ["playwright>=1.40"]
+
 [project.scripts]
 spine-mcp = "spine_mcp.server:main"
 spine = "spine_mcp.cli:main"

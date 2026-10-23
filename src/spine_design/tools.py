@@ -8,6 +8,7 @@ plus, optionally, a screenshot. Measurements alone carry most of the value
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -150,6 +151,15 @@ def _view_slug(view: dict[str, Any] | str | None) -> str | None:
 
 
 def _resolve(root: Path, view: dict[str, Any] | str | None, which: str = "latest") -> dict[str, Any]:
+    if which == "baseline":
+        slug = _view_slug(view)
+        if slug is None:
+            newest = store.captures(root)
+            slug = newest[0]["view_slug"] if newest else None
+        found = store.baseline(root, slug) if slug else None
+        if not found:
+            raise SpineWriteError(f"no approved baseline for view {slug!r}; approve one with approve_baseline")
+        return found
     if which not in {"latest", "previous"}:
         for record in store.captures(root):
             if record["id"] == which:
@@ -207,8 +217,7 @@ def get_capture(
         if not record["image"]:
             out["note"] = "this capture has no screenshot (measurements only)"
         else:
-            path = store.cache_dir(root) / record["view_slug"] / record["image"]["file"]
-            image = imaging.preview(path, crop)
+            image = imaging.preview(store.image_path(root, record), crop)
     return out, image
 
 
@@ -251,12 +260,15 @@ def _latest_per_view(root: Path) -> list[dict[str, Any]]:
 def diff_captures(
     project: str | None,
     view: dict[str, Any] | str | None = None,
-    a: str = "previous",
+    a: str = "auto",
     b: str = "latest",
     threshold: float = 0.02,
 ) -> dict[str, Any]:
     """What changed between two captures: pixels (if both have them), tokens, components."""
     root = resolve_project(project)
+    if a == "auto":
+        slug = _view_slug(view) or (store.captures(root) or [{}])[0].get("view_slug")
+        a = "baseline" if slug and store.baseline(root, slug) else "previous"
     first, second = _resolve(root, view, a), _resolve(root, view, b)
     out: dict[str, Any] = {
         "a": {"id": first["id"], "sha": first["sha"], "taken": first["taken"]},
@@ -267,10 +279,8 @@ def diff_captures(
         "components": measure.component_changes(first["extraction"], second["extraction"]),
     }
     if first["image"] and second["image"]:
-        folder = store.cache_dir(root)
         from PIL import Image
-        with Image.open(folder / first["view_slug"] / first["image"]["file"]) as ia, \
-                Image.open(folder / second["view_slug"] / second["image"]["file"]) as ib:
+        with Image.open(store.image_path(root, first)) as ia, Image.open(store.image_path(root, second)) as ib:
             pixels = imaging.diff(ia, ib, threshold)
         comps = second["extraction"].get("components", [])
         pixels["regions"] = [{"bbox": r, "components": measure.overlapping(comps, r)} for r in pixels["regions"]]
@@ -303,8 +313,11 @@ def design_brief(project: str | None, budget_tokens: int = 1200) -> dict[str, An
     for record in sorted(latest, key=lambda r: r["view_slug"]):
         fresh = _freshness(root, cfg, record, current)
         pixels = "pixels" if record["image"] else "measurements only"
+        approved = store.baseline(root, record["view_slug"])
+        status = (f"baseline {approved['baseline']['approved'][:10]} by {approved['baseline']['approved_by']}"
+                  if approved else "no baseline")
         lines.append(f"- `{record['view_slug']}` {fresh['state']} ({fresh['reason']}); {record['agent']}, "
-                     f"{fresh['age_hours']}h ago, {pixels}")
+                     f"{fresh['age_hours']}h ago, {pixels}; {status}")
 
     newest = latest[0]
     comps = newest["extraction"].get("components", [])[:10]
@@ -424,6 +437,9 @@ def ensure_capture(
     if host not in cfg.allowed_hosts:
         raise SpineWriteError(f"{host!r} is not in allowed_hosts {cfg.allowed_hosts}; Spine Design only "
                               "captures the project's own dev server unless the config allows more")
+    if state != "default" and state not in cfg.states:
+        raise SpineWriteError(f"unknown state {state!r}; declare it under [states.{state}] in spine-design.toml"
+                              + (f" (known: {', '.join(sorted(cfg.states))})" if cfg.states else ""))
     view = store.View(route, viewport or "default", theme or "default", state)
     latest = _latest_matching(root, view)
     if latest and not force:
@@ -435,20 +451,31 @@ def ensure_capture(
         reason = "forced" if force else "no capture of this view yet"
 
     from . import browseros
+    adapter = os.environ.get("SPINE_DESIGN_ADAPTER") or cfg.adapter
+    if capture_fn is None:
+        if adapter == "playwright":
+            from . import playwright_adapter
+
+            def capture_fn(url: str, **kwargs: Any) -> Any:
+                return playwright_adapter.capture(url, channel=cfg.browser_channel or None, **kwargs)
+        elif adapter == "browseros":
+            capture_fn = browseros.capture
+        else:
+            raise SpineWriteError(f"unknown adapter {adapter!r}: use browseros or playwright")
     explicit_theme = theme if theme and theme != "default" else None
     try:
-        captured = (capture_fn or browseros.capture)(
+        captured = capture_fn(
             target, viewport=_parse_viewport(viewport), theme=explicit_theme,
             theme_attr=cfg.theme_attr or None,
             color_scheme=explicit_theme if explicit_theme in {"dark", "light"} else None,
-            wait_for=cfg.wait_for, pixels=cfg.pixels, mask=cfg.mask)
+            wait_for=cfg.wait_for, pixels=cfg.pixels, mask=cfg.mask, steps=cfg.states.get(state))
     except browseros.AdapterError as exc:
         if latest:
             return {"action": "stale", "capture": latest["id"], "view": latest["view"], "reason": reason,
                     "error": str(exc)[:300]}
         raise SpineWriteError(f"could not capture {target}: {exc}") from exc
     recorded = record_capture(str(root), agent, view.as_dict(), captured.extraction,
-                              image_base64=captured.png_base64, adapter="browseros")
+                              image_base64=captured.png_base64, adapter=adapter)
     notes = recorded.pop("notes", [])
     if captured.skipped_pixels:
         notes.append("screenshot skipped (BrowserOS rendered no frame for the background tab in time); "
@@ -501,3 +528,78 @@ def _drift_lines(root: Path, cfg: store.Config, latest: list[dict[str, Any]]) ->
             parts.append(f"{s['components_differing']}/{s['components_checked']} mapped components differ")
         lines.append(f"- `{record['view_slug']}`: " + ", ".join(parts))
     return lines
+
+
+# -- D3: approved baselines (tracked) ------------------------------------------------
+
+
+def approve_baseline(
+    project: str | None,
+    agent: str,
+    view: dict[str, Any] | str | None = None,
+    which: str = "latest",
+    note: str = "",
+) -> dict[str, Any]:
+    """Promote a capture to the view's approved baseline: the reference that diffs
+    compare against by default. Baselines and inventory.json are tracked in git
+    (small by design), so every host and agent shares them. Spine never commits."""
+    import shutil
+
+    _check_writable()
+    agent = _check_agent(agent)
+    root = resolve_project(project)
+    cfg = store.load_config(root)
+    source = _resolve(root, view, which)
+    if source.get("baseline"):
+        raise SpineWriteError("that is already the baseline; pass which=latest or a capture id")
+    slug = source["view_slug"]
+    existing = store.baselines(root)
+    if slug not in existing and len(existing) >= cfg.baseline_max:
+        raise SpineWriteError(f"{len(existing)} baselines already (baseline_max = {cfg.baseline_max}); "
+                              "remove one before adding another view")
+
+    folder = store.baseline_dir(root)
+    record = {k: v for k, v in source.items()}
+    note_text, redactions = scrub(note.strip()[:300])
+    record["baseline"] = {"approved_by": agent, "approved": store.now().isoformat(),
+                          "from_capture": source["id"], "note": note_text}
+    if source.get("image"):
+        image = store.image_path(root, source)
+        size = image.stat().st_size
+        if size > cfg.baseline_max_bytes:
+            raise SpineWriteError(f"screenshot is {size // 1024} KB, over baseline_max_bytes "
+                                  f"({cfg.baseline_max_bytes // 1024} KB): use a smaller viewport, or pixels = false")
+        shutil.copyfile(image, folder / f"{slug}.webp")
+        record["image"] = {**source["image"], "file": f"{slug}.webp"}
+    else:
+        (folder / f"{slug}.webp").unlink(missing_ok=True)
+    target = folder / f"{slug}.json"
+    tmp = target.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(record, indent=1, sort_keys=True), encoding="utf-8")
+    tmp.replace(target)
+    written = [store.BASELINES + f"/{slug}.json"] + ([store.BASELINES + f"/{slug}.webp"] if record["image"] else [])
+    _write_inventory(root)
+    return {"approved": slug, "from_capture": source["id"], "replaced": slug in existing,
+            "written": written + [store.INVENTORY], "redactions": redactions,
+            "note": "uncommitted: commit these with the change they approve"}
+
+
+def _write_inventory(root: Path) -> None:
+    """A small, stable, reviewable summary of every approved view, for git diffs and other hosts."""
+    views = {}
+    for slug, record in store.baselines(root).items():
+        summary = measure.tokens(record["extraction"], top=8)
+        views[slug] = {
+            "view": record["view"],
+            "approved_by": record["baseline"]["approved_by"],
+            "approved": record["baseline"]["approved"][:10],
+            "sha": record.get("sha"),
+            "pixels": bool(record.get("image")),
+            "colors": {g: [c["hex"] for c in summary["colors"][g]] for g in measure.COLOR_GROUPS},
+            "font_sizes": [s["value"] for s in summary["scales"]["font_size"]],
+            "radii": [s["value"] for s in summary["scales"]["radius"]],
+            "fonts": [f["family"].split(",")[0].strip("\"' ") for f in summary["fonts"]],
+            "components": sorted(c["key"] for c in record["extraction"].get("components", []))[:40],
+        }
+    target = root / store.INVENTORY
+    target.write_text(json.dumps({"version": 1, "views": views}, indent=1, sort_keys=True) + "\n", encoding="utf-8")

@@ -44,6 +44,13 @@ class Config:
     wait_for: str = "body"
     theme_attr: str = "data-theme"   # set on <html> per view theme; "" to use prefers-color-scheme only
     allowed_hosts: list[str] = field(default_factory=lambda: ["127.0.0.1", "localhost", "::1"])
+    # Baselines are committed: keep them small and few.
+    baseline_max_bytes: int = 150_000
+    baseline_max: int = 40
+    # D3: named setup recipes per state, and which adapter self-captures.
+    states: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    adapter: str = "browseros"          # or "playwright" (headless; CI and Linux hosts)
+    browser_channel: str = ""           # playwright: "chrome"/"msedge" uses an installed browser
 
 
 def load_config(root: Path) -> Config:
@@ -52,10 +59,10 @@ def load_config(root: Path) -> Config:
         return Config()
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     cfg = Config()
-    for name in ("pixels", "ttl_days", "cache_days", "keep_per_view"):
+    for name in ("pixels", "ttl_days", "cache_days", "keep_per_view", "baseline_max_bytes", "baseline_max"):
         if name in data:
             setattr(cfg, name, type(getattr(cfg, name))(data[name]))
-    for name in ("base_url", "wait_for", "theme_attr"):
+    for name in ("base_url", "wait_for", "theme_attr", "adapter", "browser_channel"):
         if isinstance(data.get(name), str):
             setattr(cfg, name, data[name])
     for name in ("ui_paths", "mask", "allowed_hosts"):
@@ -63,6 +70,8 @@ def load_config(root: Path) -> Config:
             setattr(cfg, name, [str(v) for v in data[name]])
     if isinstance(data.get("components"), dict):
         cfg.components = {str(k): str(v) for k, v in data["components"].items()}
+    from .recipes import load as load_states
+    cfg.states = load_states(data)
     return cfg
 
 
@@ -148,6 +157,42 @@ def save(root: Path, record: dict[str, Any]) -> Path:
     tmp.write_text(json.dumps(record, indent=1), encoding="utf-8")
     tmp.replace(target)
     return target
+
+
+def image_path(root: Path, record: dict[str, Any]) -> Path | None:
+    """Where a record's screenshot lives: the tracked baselines folder or the local cache."""
+    if not record.get("image"):
+        return None
+    folder = baseline_dir(root) if record.get("baseline") else cache_dir(root) / record["view_slug"]
+    return folder / record["image"]["file"]
+
+
+# -- baselines: approved references, tracked in git ------------------------------
+
+BASELINES = f"{DESIGN_DIR}/baselines"
+INVENTORY = f"{DESIGN_DIR}/inventory.json"
+
+
+def baseline_dir(root: Path) -> Path:
+    path = root / BASELINES
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def baselines(root: Path) -> dict[str, dict[str, Any]]:
+    folder = root / BASELINES
+    found = {}
+    if folder.is_dir():
+        for meta in sorted(folder.glob("*.json")):
+            try:
+                found[meta.stem] = json.loads(meta.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+    return found
+
+
+def baseline(root: Path, view_slug: str) -> dict[str, Any] | None:
+    return baselines(root).get(view_slug)
 
 
 def delete(root: Path, record: dict[str, Any]) -> None:

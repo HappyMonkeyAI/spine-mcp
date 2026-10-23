@@ -189,7 +189,9 @@
   const root = document.documentElement;
   return {
     version: VERSION,
-    url: location.origin + location.pathname,
+    // Origin + path only (no query or fragment), and only for http(s): a data:/blob: URL's
+    // "path" is the whole document, form values included.
+    url: /^https?:$/.test(location.protocol) ? (location.origin + location.pathname).slice(0, 300) : location.protocol,
     viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
     theme: root.getAttribute("data-theme") || root.getAttribute("data-color-mode") ||
       (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
