@@ -109,7 +109,7 @@ def test_brief_respects_budget_and_names_omissions(project: Path) -> None:
 
     tight = core.session_brief(str(project), budget_tokens=120)
     assert tight["tokens"] <= 140 and tight["omitted"]
-    assert "omitted for budget" in tight["brief"]
+    assert "_for budget, omitted: " in tight["brief"]
 
 
 def test_brief_cites_latest_journal_when_no_checkpoints(project: Path) -> None:
@@ -229,7 +229,7 @@ def test_brief_has_verify_commands_adr_index_and_stale_plan_warning(project: Pat
     assert "- from AGENTS.md:3 (Verification)\n  - `npm run typecheck && npm test`" in brief
     assert "comment" not in brief.split("## verify", 1)[1].split("##", 1)[0]
     adrs = brief.split("## decisions (ADRs)", 1)[1]
-    assert adrs.index("0003: Terrain v2 [Proposed]") < adrs.index("0002: Worktree coordination [Accepted]")
+    assert adrs.index("0003: Terrain v2 [Proposed — awaiting decision]") < adrs.index("0002: Worktree coordination [Accepted]")
     assert "`TASKS.md` last changed" in brief and "3 merges ago" in brief
 
 
@@ -257,3 +257,44 @@ def test_brief_generalises_to_differently_shaped_repos(project: Path) -> None:
     assert "**Architectural rules**" in brief and "`packages/geometry-kernel`" in brief
     assert "0003: Line of sight [Accepted]" in brief
     assert core.recall(str(project), "multiplayer lobbies")["results"][0]["source"].startswith("ROADMAP.md")
+
+
+def test_brief_prefers_breadth_compact_forms_before_dropping(project: Path) -> None:
+    rules = "".join(f"- Rule number {i} says something long enough to need clipping in the brief today.\n" for i in range(20))
+    write(project, "CONTEXT.md", f"# Context\n\n## Non-negotiables\n\n{rules}")
+    for n in range(1, 9):
+        write(project, f"docs/adr/000{n}-x.md", f"# ADR 000{n}: Decision {n}\n\n## Status\n\nAccepted\n\n## Decision\n\n"
+                                               f"Use approach {n} because of reason {n} which is explained at length here.\n")
+    commit(project, "many rules and adrs")
+    full = core.session_brief(str(project), budget_tokens=6000)
+    assert not full["shortened"] and "because of reason 8" in full["brief"]
+    tight_budget = full["tokens"] - 150
+    tight = core.session_brief(str(project), budget_tokens=tight_budget)
+    assert "decisions (ADRs)" not in tight["omitted"] and tight["shortened"]
+    assert "## decisions (ADRs)" in tight["brief"] and tight["tokens"] <= tight_budget
+
+
+def test_adr_drift_warning_and_qualified_status(project: Path) -> None:
+    write(project, "docs/adr/0001-plan.md", "# ADR 0001: Plan\n\n- **Status:** Accepted (in progress: packets P2 onward)\n\n## Decision\n\n| a | b |\n|---|---|\n\nState is plain data.\n")
+    commit(project, "adr")
+    for i in range(5):
+        write(project, "src/world/stream.ts", f"export const x = {i + 10};\n")
+        commit(project, f"work {i}")
+    brief = core.session_brief(str(project), budget_tokens=6000)["brief"]
+    assert "0001: Plan [Accepted (in progress: packets P2 onward)]: State is plain data." in brief
+    assert '`docs/adr/0001-plan.md` status "Accepted (in progress: packets P2 onward)" unchanged for 5 commits' in brief
+
+
+def test_section_adr_shorthand_whole_file_grep_and_recall_path(project: Path) -> None:
+    write(project, "docs/adr/0007-authority.md", "# ADR 0007: Authority\n\n## Decision\n\nProgress owns resources.\n")
+    write(project, "apps/game/docs/smoke-test.md", "# Smoke\n\n## Known limits\n\nRight-click cancels the path preview instead of facing.\n")
+    write(project, "apps/game/package.json", '{"scripts": {"dev": "vite", "typecheck": "tsc", "smoke": "node smoke.mjs"}}')
+    commit(project, "app docs")
+    assert core.get_section(str(project), "adr:7", "Decision")["text"].endswith("Progress owns resources.")
+    assert core.get_section(str(project), "adr:9", "Decision")["found"] is False
+    hits = core.get_section(str(project), "PROGRESS.md", grep="held keys")
+    assert hits["matches"] == 1 and "[PROGRESS.md:7 2026-10-06" in hits["text"]
+    found = core.recall(str(project), "right-click preview", path="apps/game")["results"]
+    assert [r["source"] for r in found] == ["apps/game/docs/smoke-test.md:5"]
+    assert core.recall(str(project), "right-click preview", path="src")["results"] == []
+    assert "- `apps/game` package scripts: typecheck, smoke" in core.session_brief(str(project), budget_tokens=6000)["brief"]

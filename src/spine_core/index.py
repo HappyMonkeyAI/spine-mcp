@@ -29,7 +29,13 @@ DEFAULT_SOURCES = [
     "docs/adr/*.md",
     "docs/plans/*.md",
     ".agent/memories/**/*.md",
+    # Monorepo apps and packages: their own READMEs, agent files and docs.
+    "apps/*/*.md",
+    "apps/*/docs/*.md",
+    "packages/*/README.md",
 ]
+
+IGNORED_DIRS = {"node_modules", ".worktrees", ".git", "dist", "build", ".venv", "vendor"}
 
 # Ordered: first matching prefix wins.
 KINDS = [
@@ -148,7 +154,9 @@ class SpineIndex:
         for pattern in self.source_patterns():
             for path in sorted(self.root.glob(pattern)):
                 if path.is_file() and path.resolve().is_relative_to(root):
-                    found.setdefault(to_posix(self.root, path), path)
+                    rel = to_posix(self.root, path)
+                    if not any(part in IGNORED_DIRS for part in rel.split("/")[:-1]):
+                        found.setdefault(rel, path)
         return found
 
     # -- refresh -----------------------------------------------------------
@@ -250,22 +258,25 @@ class SpineIndex:
         kinds: list[str] | None = None,
         since: str | None = None,
         limit: int = 8,
+        path: str | None = None,
     ) -> list[Hit]:
         terms = re.findall(r"\w+", query)
         if not terms:
             return []
         quoted = [f'"{t}"' for t in terms]
         # Chunks matching every term rank first; top up with any-term matches.
-        hits = self._search(" ".join(quoted), kinds, since, limit)
+        hits = self._search(" ".join(quoted), terms, kinds, since, limit, path)
         if len(hits) < limit and len(terms) > 1:
             seen = {(h.path, h.line_start) for h in hits}
             hits += [
-                h for h in self._search(" OR ".join(quoted), kinds, since, limit)
+                h for h in self._search(" OR ".join(quoted), terms, kinds, since, limit, path)
                 if (h.path, h.line_start) not in seen
             ][: limit - len(hits)]
         return hits
 
-    def _search(self, match: str, kinds: list[str] | None, since: str | None, limit: int) -> list[Hit]:
+    def _search(
+        self, match: str, terms: list[str], kinds: list[str] | None, since: str | None, limit: int, path: str | None
+    ) -> list[Hit]:
         sql = (
             "SELECT c.*, snippet(chunks_fts, 1, '[', ']', ' … ', 48) AS snip"
             " FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid"
@@ -278,9 +289,25 @@ class SpineIndex:
         if since:
             sql += " AND c.date >= ?"
             args.append(since)
+        if path:
+            sql += " AND c.path LIKE ? ESCAPE '\\'"
+            args.append(path.strip("/").replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
         sql += " ORDER BY bm25(chunks_fts, 5.0, 1.0) LIMIT ?"
         args.append(limit)
         return [
-            Hit(r["path"], r["kind"], r["heading"], r["line_start"], r["line_end"], r["date"], r["snip"])
+            Hit(r["path"], r["kind"], r["heading"], _matching_line(r["text"], r["line_start"], terms),
+                r["line_end"], r["date"], r["snip"])
             for r in self.db.execute(sql, args)
         ]
+
+
+def _matching_line(text: str, line_start: int, terms: list[str]) -> int:
+    """The line of the chunk where the most query terms appear, so a citation
+    points at the bullet, not the top of a long section."""
+    words = [t.lower() for t in terms]
+    best, best_score = line_start, 0
+    for offset, line in enumerate(text.split("\n")):
+        score = sum(w in line.lower() for w in words)
+        if score > best_score:
+            best, best_score = line_start + offset, score
+    return best

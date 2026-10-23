@@ -96,11 +96,19 @@ def get_section(
 ) -> dict[str, Any]:
     """Return one `##` section of a project markdown file.
 
-    An empty heading returns the file's outline (headings, lines, sizes).
-    `grep` keeps only the bullets/paragraphs that mention every given word,
-    for sections too big to read whole. Output is capped at `max_tokens`.
+    `path` may be `adr:0008` for the ADR numbered 0008. An empty heading returns
+    the file's outline (headings, lines, sizes), or with `grep`, the matching
+    bullets/paragraphs from the whole file. `grep` keeps only blocks that mention
+    every given word, for sections too big to read whole. Output is capped at `max_tokens`.
     """
     root = resolve_project(project)
+    adr = re.fullmatch(r"(?i)adr[:\s-]*(\d+)", path.strip())
+    if adr:
+        matches = sorted((root / "docs" / "adr").glob(f"{adr.group(1).zfill(4)}*.md"))
+        if len(matches) != 1:
+            return {"found": False, "path": path,
+                    "candidates": [to_posix(root, m) for m in matches] or "no ADR with that number in docs/adr/"}
+        path = to_posix(root, matches[0])
     target = safe_path(root, path)
     if not target.is_file():
         raise SpinePathError(f"no such file: {path}")
@@ -108,6 +116,19 @@ def get_section(
     rel = to_posix(root, target)
     outline = [{"heading": p.heading, "line": p.line_start, "tokens": tokens(p.text)} for p in parts]
     wanted = heading.strip().lower().lstrip("#").strip()
+    if not wanted and grep:
+        words = [w.lower() for w in grep.split()]
+        hits = [
+            f"[{rel}:{part.line_start} {part.heading}] {block}"
+            for part in parts for block in blocks(_body(part.text))
+            if all(w in block.lower() for w in words)
+        ]
+        text = "\n".join(hits) or f"(nothing in {rel} mentions {grep!r})"
+        full = tokens(text)
+        if full > max_tokens:
+            text = text[: max_tokens * 4].rsplit("\n", 1)[0] + "\n… (truncated; narrow the grep)"
+        return {"found": bool(hits), "source": rel, "matches": len(hits), "tokens": tokens(text),
+                "truncated_from": full if full > max_tokens else None, "text": text}
     if not wanted:
         return {"found": True, "path": rel, "outline": outline}
     match = next((p for p in parts if p.heading.lower() == wanted), None) or next(
@@ -141,10 +162,13 @@ def recall(
     kinds: list[str] | None = None,
     since: str | None = None,
     limit: int = 8,
+    path: str | None = None,
 ) -> dict[str, Any]:
-    """Full-text search across the spine. Memory results carry a staleness line."""
+    """Full-text search across the spine; `path` limits it to a prefix such as
+    `apps/xeno-tactical`. Each source points at the best-matching line. Memory
+    results carry a staleness line."""
     with open_index(project) as index:
-        hits = index.search(query, kinds=kinds, since=since, limit=max(1, min(limit, 25)))
+        hits = index.search(query, kinds=kinds, since=since, limit=max(1, min(limit, 25)), path=path)
         tracked = git.tracked_files(index.root) if any(h.kind in MEMORY_KINDS for h in hits) else []
         results = []
         for hit in hits:
@@ -217,28 +241,30 @@ def distilled_through(root: Path) -> str | None:
 
 def session_brief(project: str | None = None, focus: str | None = None, budget_tokens: int = 2500) -> dict[str, Any]:
     """Warm-start brief: git state, last checkpoint, open tasks, recent journal,
-    rules, focus hits, doc map, warnings. Sections that do not fit the budget
-    are dropped whole and named in `omitted`.
+    rules, focus hits, doc map, warnings. A section that does not fit the budget
+    falls back to its compact form if it has one (named in `shortened`), else it
+    is dropped whole and named in `omitted`.
     """
     with open_index(project) as index:
         root = index.root
         merges = git.recent_merges(root)
-        candidates: list[tuple[str, str]] = [
-            ("git", _git_section(root)),
-            ("recent history", _history_section(root, merges)),
-            ("current state", _state_section(index)),
-            ("last checkpoint", _checkpoint_section(index)),
-            ("open tasks", _tasks_section(project or str(root), merges)),
+        # (name, full body, compact body or None), in priority order.
+        candidates: list[tuple[str, str, str | None]] = [
+            ("git", _git_section(root), None),
+            ("recent history", _history_section(root, merges), None),
+            ("current state", _state_section(index), None),
+            ("last checkpoint", _checkpoint_section(index), None),
+            ("open tasks", _tasks_section(project or str(root), merges), None),
             # What not to trust ranks above detail: it changes how everything else is read.
-            ("warnings", _warnings_section(index)),
-            ("recent journal", _journal_section(index, merges)),
-            ("rules", _rules_section(index)),
-            ("verify", _verify_section(index)),
-            ("decisions (ADRs)", _adrs_section(index)),
+            ("warnings", _warnings_section(index), None),
+            ("recent journal", _journal_section(index, merges), None),
+            ("rules", _rules_section(index), _rules_section(index, width=48)),
+            ("verify", _verify_section(index), None),
+            ("decisions (ADRs)", _adrs_section(index), _adrs_section(index, rules=False)),
         ]
         if focus:
-            candidates.append((f"focus: {focus}", _focus_section(index, focus)))
-        candidates.append(("doc map", _doc_map_section(index)))
+            candidates.append((f"focus: {focus}", _focus_section(index, focus), None))
+        candidates.append(("doc map", _doc_map_section(index), None))
 
     header = (
         f"# Spine brief — {root.name}\n"
@@ -246,23 +272,37 @@ def session_brief(project: str | None = None, focus: str | None = None, budget_t
         "fetch detail with get_section / recall. Before you stop: `checkpoint` "
         "(agent = your name: claude-code, codex, hermes, grok, ...) with done / next / blockers._"
     )
+    # Breadth before detail: first place every section in its smallest form, in
+    # priority order, then upgrade compact ones to full while the budget allows.
     used = tokens(header)
-    kept = [header]
+    chosen: dict[str, str] = {}
     omitted: list[str] = []
-    for name, body in candidates:
+    for name, body, compact in candidates:
         if not body:
             continue
-        block = f"## {name}\n{body}"
-        cost = tokens(block)
+        smallest = compact or body
+        cost = tokens(f"## {name}\n{smallest}")
         if used + cost > budget_tokens:
             omitted.append(name)
             continue
-        kept.append(block)
+        chosen[name] = smallest
         used += cost
-    if omitted:
-        kept.append(f"_omitted for budget: {', '.join(omitted)}_")
+    for name, body, compact in candidates:
+        if compact and chosen.get(name) == compact:
+            extra = tokens(f"## {name}\n{body}") - tokens(f"## {name}\n{compact}")
+            if used + extra <= budget_tokens:
+                chosen[name] = body
+                used += extra
+    shortened = [name for name, body, compact in candidates
+                 if compact and compact != body and chosen.get(name) == compact]
+
+    kept = [header] + [f"## {name}\n{chosen[name]}" for name, _, _ in candidates if name in chosen]
+    notes = ([f"shortened: {', '.join(shortened)}"] if shortened else []) + (
+        [f"omitted: {', '.join(omitted)}"] if omitted else [])
+    if notes:
+        kept.append(f"_for budget, {'; '.join(notes)}_")
     brief = "\n\n".join(kept)
-    return {"project": str(root), "tokens": tokens(brief), "omitted": omitted, "brief": brief}
+    return {"project": str(root), "tokens": tokens(brief), "omitted": omitted, "shortened": shortened, "brief": brief}
 
 
 def _body(text: str) -> str:
@@ -438,9 +478,10 @@ def _undated_progress(index: SpineIndex) -> str:
     return "\n".join(lines)
 
 
-def _rules_section(index: SpineIndex) -> str:
+def _rules_section(index: SpineIndex, width: int | None = None) -> str:
     """Every hard rule as a short headline: an agent can't follow a rule it was
-    never shown, so breadth beats detail here (get_section/grep has the detail)."""
+    never shown, so breadth beats detail here (get_section/grep has the detail).
+    `width` forces a narrower clip for the compact form."""
     lines = []
     for path in RULE_FILES:
         for row in index.chunks(path=path):
@@ -450,9 +491,9 @@ def _rules_section(index: SpineIndex) -> str:
                 rules = bullets(body)
                 if not rules:
                     continue
-                width = 100 if len(rules) <= 8 else 64
+                clip_to = width or (100 if len(rules) <= 8 else 64)
                 lines.append(f"- **{heading}** ({path}:{row['line_start']}, {len(rules)} rules)")
-                lines += [f"  - {clip_rule(rule.replace('**', ''), width)}" for rule in rules[:30]]
+                lines += [f"  - {clip_rule(rule.replace('**', ''), clip_to)}" for rule in rules[:30]]
     return "\n".join(lines)
 
 
@@ -473,44 +514,103 @@ VERIFY_HEADINGS = ("verification", "verify", "testing", "checks")
 
 
 def _verify_section(index: SpineIndex) -> str:
-    """The project's own verification commands, verbatim from the first matching code block."""
+    """How to verify: the project's own guidance and commands (verbatim from the first
+    verification section with a code block), plus each app's package.json scripts,
+    which are the ground truth for per-app checks in a monorepo."""
+    lines: list[str] = []
     for path in RULE_FILES + ("README.md",):
         for row in index.chunks(path=path):
             for heading, body in _subsections(row["heading"], row["text"]):
-                if not heading.lower().startswith(VERIFY_HEADINGS):
+                if lines or not heading.lower().startswith(VERIFY_HEADINGS):
                     continue
                 block = re.search(r"```[^\n]*\n(.*?)```", body, re.S)
-                if block:
-                    commands = [c.strip() for c in block.group(1).split("\n") if c.strip() and not c.strip().startswith("#")]
-                    return f"- from {path}:{row['line_start']} ({heading})\n" + "\n".join(
-                        f"  - `{clip(c, 110)}`" for c in commands[:6]
-                    )
+                if not block:
+                    continue
+                guidance = body[: block.start()].strip()
+                lines.append(f"- from {path}:{row['line_start']} ({heading})"
+                             + (f": {clip_sentence(guidance, 160)}" if guidance else ""))
+                commands = [c.strip() for c in block.group(1).split("\n") if c.strip() and not c.strip().startswith("#")]
+                lines += [f"  - `{clip(c, 110)}`" for c in commands[:6]]
+    for manifest in [index.root / "package.json", *sorted(index.root.glob("apps/*/package.json"))]:
+        scripts = _check_scripts(manifest)
+        if scripts:
+            where = to_posix(index.root, manifest.parent) if manifest.parent != index.root else "root"
+            lines.append(f"- `{where}` package scripts: {', '.join(scripts)}")
+    return "\n".join(lines)
+
+
+CHECK_SCRIPT = re.compile(r"(?i)^(type-?check|lint|test|tests|build|smoke|e2e|check|verify)([:-].*)?$")
+
+
+def _check_scripts(manifest: Path) -> list[str]:
+    try:
+        scripts = json.loads(manifest.read_text(encoding="utf-8")).get("scripts", {})
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [name for name in scripts if CHECK_SCRIPT.match(name)][:8] if isinstance(scripts, dict) else []
+
+
+def _adr_status(rows: list[Any]) -> str:
+    """An ADR's status line: a `## Status` section, or a `- **Status:** X` preamble line."""
+    status_row = next((r for r in rows if r["heading"].lower() == "status"), None)
+    if status_row:
+        return _body(status_row["text"]).strip().replace("*", "")
+    found = re.search(r"Status:?\**:?\s*(.+)", rows[0]["text"]) if rows else None
+    return found.group(1).replace("*", "").strip() if found else ""
+
+
+def _adr_paths(index: SpineIndex) -> list[str]:
+    return sorted({d["path"] for d in index.docs() if d["kind"] == "adr" and not d["path"].endswith("README.md")},
+                  reverse=True)
+
+
+ADR_RULE_LINES = 8
+
+
+def _first_rule(text: str) -> str:
+    """The first prose sentence or bullet of a Decision section, skipping tables,
+    headings and code (they don't clip into a readable line)."""
+    for line in _body(text).split("\n"):
+        line = line.strip()
+        if not line or line.startswith(("|", "#", "```", ">")):
+            continue
+        return line.removeprefix("- ").removeprefix("* ").replace("**", "")
     return ""
 
 
-def _adrs_section(index: SpineIndex) -> str:
-    """An index of ADRs: title and status, newest first. Decision text is often a
-    table or sub-headings, so it stays one get_section call away instead."""
-    adrs = sorted({d["path"] for d in index.docs() if d["kind"] == "adr" and not d["path"].endswith("README.md")},
-                  reverse=True)
+def _short_status(status: str) -> str:
+    """'Accepted — 2026-08-29' → 'Accepted'; keeps qualifiers like '(in progress: …)',
+    which are exactly what an agent needs to spot a status that has gone stale."""
+    status = re.sub(r"\s*[—–-]\s*\d{4}-\d{2}-\d{2}.*$", "", status.strip())
+    return clip(re.split(r"\.\s", status, maxsplit=1)[0].rstrip("."), 48) if status else "?"
+
+
+def _adrs_section(index: SpineIndex, rules: bool = True) -> str:
+    """ADRs newest first: title and status, plus the decision's first rule for the
+    newest few (an agent can't respect a rule it only knows the title of).
+    rules=False is the compact form used when the brief is tight."""
+    adrs = _adr_paths(index)
     lines = []
-    for rel in adrs[:16]:
+    for n, rel in enumerate(adrs[:16]):
         rows = index.chunks(path=rel)
         title = next((r["heading"] for r in rows if r["line_start"] <= 2), Path(rel).stem)
-        status_row = next((r for r in rows if r["heading"].lower() == "status"), None)
-        status = _body(status_row["text"]).strip().replace("*", "") if status_row else ""
-        if not status and rows:
-            # "- **Status:** Accepted" style, in the preamble.
-            found = re.search(r"Status:?\**:?\s*(.+)", rows[0]["text"])
-            status = found.group(1).replace("*", "").strip() if found else ""
-        status_word = clip(re.split(r"[.—–(]", status, maxsplit=1)[0].strip(), 24) if status else "?"
+        status_word = _short_status(_adr_status(rows))
         title = re.sub(r"^ADR[\s-]*", "", title).strip()
-        lines.append(f"- {clip(title, 64)} [{status_word}]")
+        line = f"- {clip(title, 64)} [{status_word}]"
+        decision = next((r for r in rows if r["heading"].lower().startswith("decision")), None)
+        rule = _first_rule(decision["text"]) if rules and decision and n < ADR_RULE_LINES else ""
+        if rule:
+            line += f": {clip_sentence(rule, 120)}"
+        lines.append(line)
     if len(adrs) > 16:
         lines.append(f"- … {len(adrs) - 16} older in `docs/adr/`")
     if lines:
-        lines.append("- detail: get_section('docs/adr/<file>', 'Decision') or recall")
+        lines.append("- detail: get_section('adr:<number>', 'Decision')")
     return "\n".join(lines)
+
+
+UNSETTLED = re.compile(r"(?i)\b(in progress|proposed|pending|draft|awaiting|wip)\b")
+DRIFT_AFTER_COMMITS = 5
 
 
 def _focus_section(index: SpineIndex, focus: str) -> str:
@@ -542,10 +642,20 @@ def _warnings_section(index: SpineIndex) -> str:
         if merged and int(merged) >= STALE_AFTER_MERGES:
             lines.append(f"- `{rel}` last changed {last[1]}, {merged} merges ago: its open/next items may already "
                          "have shipped; check against recently merged")
-    for doc in index.docs():
-        size = doc_tokens(doc)
-        if size > OVERSIZED_TOKENS:
-            lines.append(f"- `{doc['path']}` is ~{size // 1000}k tokens: use recall/get_section, don't read it whole")
+    # ADRs whose status still says "in progress"/"proposed" while the project moved on.
+    for rel in _adr_paths(index):
+        status = _adr_status(index.chunks(path=rel))
+        if not UNSETTLED.search(status):
+            continue
+        last = git.last_commit(index.root, rel)
+        since = git.run_git(index.root, "rev-list", "--count", f"{last[0]}..HEAD") if last else None
+        if since and int(since) >= DRIFT_AFTER_COMMITS:
+            lines.append(f"- `{rel}` status \"{clip(status, 70)}\" unchanged for {since} commits (since {last[1]}): "
+                         "check whether it's still true")
+    large = sorted((d for d in index.docs() if doc_tokens(d) > OVERSIZED_TOKENS), key=lambda d: -d["chars"])
+    if large:
+        lines.append("- too large to read whole, use recall/get_section: "
+                     + ", ".join(f"`{d['path']}` ~{doc_tokens(d) // 1000}k" for d in large))
     memory_docs = [d for d in index.docs() if d["kind"] in MEMORY_KINDS and d["kind"] != "checkpoint"]
     if memory_docs:
         tracked = git.tracked_files(index.root)

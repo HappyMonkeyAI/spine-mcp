@@ -53,8 +53,9 @@ async def get_section(
     max_tokens: int = 2000,
 ) -> dict[str, Any]:
     """Return one `##` section of a project markdown file (e.g. CONTEXT.md, 'Non-negotiables').
-    Empty heading → the file's outline. Heading matches exactly, else by substring.
-    grep="terrain version" keeps only bullets/paragraphs mentioning every word (for huge sections)."""
+    path may be "adr:0008". Empty heading → the file's outline; empty heading + grep → matching
+    bullets/paragraphs across the whole file. Heading matches exactly, else by substring.
+    grep="terrain version" keeps only bullets/paragraphs mentioning every word."""
     return core.get_section(_project(project), path, heading, grep=grep, max_tokens=max_tokens)
 
 
@@ -65,10 +66,12 @@ async def recall(
     kinds: list[str] | None = None,
     since: str | None = None,
     limit: int = 8,
+    path: str | None = None,
 ) -> dict[str, Any]:
-    """Search the project spine (docs, ADRs, plans, journal, memories).
-    kinds: doc, adr, plan, journal, checkpoint, decision, insight, lesson. since: YYYY-MM-DD."""
-    return core.recall(_project(project), query, kinds=kinds, since=since, limit=limit)
+    """Search the project spine (docs, ADRs, plans, journal, memories, app docs).
+    kinds: doc, adr, plan, journal, checkpoint, decision, insight, lesson. since: YYYY-MM-DD.
+    path: limit to a prefix, e.g. "apps/xeno-tactical". Sources point at the matching line."""
+    return core.recall(_project(project), query, kinds=kinds, since=since, limit=limit, path=path)
 
 
 @mcp.tool()

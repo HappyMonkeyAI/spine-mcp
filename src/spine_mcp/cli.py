@@ -36,6 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     rec.add_argument("--kind", action="append", dest="kinds")
     rec.add_argument("--since")
     rec.add_argument("--limit", type=int, default=8)
+    rec.add_argument("--path", help="limit to a path prefix, e.g. apps/xeno-tactical")
 
     sub.add_parser("tasks", help="merged task view (JSON)")
     sub.add_parser("audit", help="truth audit (JSON)")
@@ -81,12 +82,12 @@ def main(argv: list[str] | None = None) -> int:
             result = core.get_section(
                 args.project, args.path, args.heading, grep=args.grep, max_tokens=args.max_tokens
             )
-            if result["found"] and "text" in result:
+            if "text" in result:
                 print(result["text"])
             else:
                 _json(result)
         elif args.command == "recall":
-            _json(core.recall(args.project, args.query, kinds=args.kinds, since=args.since, limit=args.limit))
+            _json(core.recall(args.project, args.query, kinds=args.kinds, since=args.since, limit=args.limit, path=args.path))
         elif args.command == "tasks":
             _json(core.tasks(args.project))
         elif args.command == "audit":
