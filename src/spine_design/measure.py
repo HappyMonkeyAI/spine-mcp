@@ -10,7 +10,7 @@ from typing import Any
 COLOR_GROUPS = ("background", "color", "border")
 SCALE_GROUPS = ("font_size", "spacing", "radius", "line_height")
 SAME_COLOR = 3.0      # CIE76 ΔE: below ~2-3 people can't tell two colours apart
-VAR_MATCH = 2.0
+VAR_MATCH = 1.0  # a colour that comes from a variable matches it almost exactly
 
 RGB_RE = re.compile(r"rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)")
 HEX_RE = re.compile(r"#([0-9a-fA-F]{3,8})\b")

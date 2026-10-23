@@ -12,7 +12,7 @@ uncommitted for you to commit with the work. The index is a self-ignoring cache 
 
 ## Status
 
-**Spine: slices S1 (read) and S2 (write) built. Spine Design: slice D1 built.** S3 (proxy catalogue, registry resolution,
+**Spine: slices S1 (read) and S2 (write) built. Spine Design: slices D1 and D2 built.** S3 (proxy catalogue, registry resolution,
 protocol ADR) is next.
 
 Measured on MRPGRealms (2026-10-23): brief ~2.4k tokens vs ~10k for protocol
@@ -141,7 +141,7 @@ block on error. Other agents get the same behaviour from the snippet above.
 }
 ```
 
-## Spine Design (second server, slice D1)
+## Spine Design (second server, slices D1–D2)
 
 Visual memory and inventory for a project's running UI. It stores captures with history,
 measures design tokens and components from the live DOM, and diffs captures. Answers are
@@ -151,7 +151,9 @@ Mount `uv run --project <spine-mcp> spine-design-mcp` the same way as Spine.
 
 | Tool | Purpose |
 |---|---|
-| `design_brief(project)` | Views and their freshness, colours by role with the app's CSS variable names, size scales, fonts, components. About 300 tokens, no image. |
+| `design_brief(project)` | Views and their freshness, colours by role with the app's CSS variable names, size scales, fonts, components, drift vs `DESIGN.md`. About 300–1000 tokens, no image. |
+| `ensure_capture(agent, project, route?, viewport?, theme?, state?, force?)` | A fresh capture of a view, taken only when needed: reused if no UI source file changed, otherwise the server captures through BrowserOS neo itself, so no screenshot passes through the agent. Pixels are best-effort; measurements always arrive. |
+| `check_design(project, view?)` | Running UI vs `DESIGN.md` tokens: % of colour use on the palette, off-palette colours (with the CSS variable behind them), font sizes / radii / spacing off scale, fonts, and mapped components' measured styles vs spec. Facts with counts. |
 | `extraction_script()` | The JS to run in the page before screenshotting: masks inputs/canvas with overlays (the page's data is untouched), freezes animation, returns measurements. |
 | `record_capture(agent, extraction, project, route?, viewport?, theme?, state?, image_path?, image_base64?)` | Store a capture. The screenshot is optional: measurements alone give tokens, components and style diffs. |
 | `get_capture(project, view?, which?, include_image?, crop?)` | Measurements and freshness. With `include_image`, a cropped, downscaled webp. |
@@ -163,12 +165,23 @@ Mount `uv run --project <spine-mcp> spine-design-mcp` the same way as Spine.
 | Agent's browser | How |
 |---|---|
 | Playwright MCP / chrome-devtools MCP (save files) | evaluate `extraction_script` with `filename=...json`, take a screenshot with `filename=...png`, then `record_capture(extraction=<json path>, image_path=<png>)`. Send the script once and keep it on `window`: the Playwright MCP echoes code back. |
-| BrowserOS neo | evaluate the script (the result is saved to a local file when it's large), then `record_capture` with no image. Server-side BrowserOS pixels arrive in D2. |
+| BrowserOS neo | Don't capture yourself: call `ensure_capture`. The server drives BrowserOS through its MCP (`SPINE_BROWSEROS_URL`, default `http://127.0.0.1:9010/mcp`). |
 | Any other | measurements only, the same way |
 
 Captures live in `<project>/.agent/design/cache/`, which ignores itself, is kept per host, and expires after 30 days or 20 per view.
-`<project>/.agent/design/spine-design.toml` (optional, tracked) sets `pixels = false`, `ui_paths`,
-`mask`, `ttl_days` and `[components]` mappings.
+`<project>/.agent/design/spine-design.toml` (optional, tracked) configures it, for example:
+
+```toml
+base_url = "http://127.0.0.1:5197"   # the dev server ensure_capture visits
+wait_for = "#root *"                 # selector that means "rendered"
+theme_attr = "data-theme"            # set on <html> per view theme ("" = prefers-color-scheme only)
+mask = [".xterm"]                    # never captured (inputs, canvas, [data-spine-mask] always are)
+pixels = true                        # false = measurements only, no images stored
+# allowed_hosts = ["127.0.0.1", "localhost"]   # ensure_capture refuses anything else
+
+[components]                         # DESIGN.md name -> measured component, for check_design
+session-sidebar = "aside.session-drawer"
+```
 
 ## License
 

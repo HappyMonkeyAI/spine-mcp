@@ -268,8 +268,41 @@ Acceptance, on ZeroGTerm, captured through BrowserOS neo by an agent:
 - `design_brief` ≤ 1.2k tokens. Answering "what color is the active session item?" costs no image.
 - Seeded secrets in an input field never appear in a stored image or JSON (V2).
 
-**D2 — BrowserOS adapter and spec comparison.** The server captures through BrowserOS neo's MCP
-(CDP screenshot, chunked extraction), plus `ensure_capture` freshness and `check_design`.
+**D2 — BrowserOS adapter and spec comparison. Built 2026-10-23.** The server captures through
+BrowserOS neo's MCP (CDP screenshot, chunked extraction), plus `ensure_capture` freshness and `check_design`.
+
+What D2 learned about driving BrowserOS from a server (all in `spine_design/browseros.py`):
+- **Background tabs are throttled unpredictably.** Agent tabs open in the background. Once
+  Chrome deprioritises them, every step slows (about 2 s per evaluate), and a CDP screenshot
+  waits for a frame that can take 0.1 s to over 20 s. Focus emulation and
+  `Page.setWebLifecycleState` don't force a frame. Raising the tab or opening a window would
+  disturb the user, so they aren't used.
+- **The design response: pixels are best-effort, measurements are not.**
+  - The screenshot gets whatever is left of a 25 s budget and is skipped (`skipped_pixels`)
+    rather than failing the capture.
+  - Emulating a colour scheme on every capture keeps tabs noticeably quicker.
+  - After the first slow capture or two, captures take about 0.8 s.
+- **Never leak tabs.** A run killed at BrowserOS's 30 s cap never reaches its `finally`.
+  - 13 leaked ZeroGTerm tabs accumulated during development, each running the app in the
+    background and slowing every later capture.
+  - Every step now has its own deadline. After any failure, a cleanup run in the same session
+    closes the session's own tabs.
+- **Result shape.** `run` returns values inline even at 120 KB (`ok\nreturn: <json>` plus a session
+  line). Only `page.evaluate` inside `run` drops large values, hence the 4 KB chunked read-back.
+- **Do not wait on `document.fonts.ready`.** In a background tab, that promise never settled.
+
+Live on ZeroGTerm (both themes, `check_design` against its `DESIGN.md`):
+- **Dark theme:** 61.9% of colour use is on the palette.
+  - Off palette: `--text-2` #8b93a3 ×34 (a third text tier the spec lacks), the
+    `--surface-3/4` and `--line-2/3` ramps, and a stray `#3b82f6` border.
+  - `primary` #0A0C10 is unused: the main surfaces are `--surface-1` #0d1015.
+- **Light theme:** 20.0% on palette, flagged as undocumented.
+- **Scales:** 13px ×117 vs 14px body; 10/9px vs the 11px label; 5px radius ×11 vs 4/6/10.
+- **Components:** `session-sidebar` has radius 0 / padding 0 vs 6px / 12px. `app-shell`'s background
+  matches once the inherited background is compared (a transparent element shows its ancestor's
+  colour); its 13px text doesn't match 14px.
+- **Freshness:** a second `ensure_capture` with no UI change reused the capture in 0.1 s,
+  without a browser.
 Acceptance:
 - Second `ensure_capture` with no UI change takes no screenshot.
 - Editing one `.css` file makes the view stale with that file as the reason.

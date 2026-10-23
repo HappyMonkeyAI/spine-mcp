@@ -109,7 +109,8 @@
   const groups = new Map();
 
   let seen = 0;
-  for (const el of document.body.querySelectorAll("*")) {
+  // <html> and <body> carry the app background, so measure them too.
+  for (const el of [document.documentElement, document.body, ...document.body.querySelectorAll("*")]) {
     if (seen >= MAX_ELEMENTS) break;
     if (overlayRoot.contains(el)) continue;
     const r = el.getBoundingClientRect();
@@ -149,7 +150,14 @@
     if (!key) continue;
     let g = groups.get(key);
     if (!g) {
-      g = { key, selector, role, name: accessibleName(el), count: 0, bboxes: [], styles: s,
+      // A transparent component shows its ancestor's background: record what is actually seen.
+      let shown = s.background;
+      for (let up = el.parentElement; !shown && up; up = up.parentElement) {
+        const bg = getComputedStyle(up).backgroundColor;
+        if (!transparent(bg)) shown = bg;
+      }
+      g = { key, selector, role, name: accessibleName(el), count: 0, bboxes: [],
+        styles: { ...s, effective_background: shown || null },
         classes: Array.from(el.classList).slice(0, 4) };
       groups.set(key, g);
     }

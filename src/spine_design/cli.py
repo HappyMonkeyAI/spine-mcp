@@ -49,6 +49,18 @@ def main(argv: list[str] | None = None) -> int:
     com.add_argument("--name")
     com.add_argument("--view")
 
+    ens = sub.add_parser("ensure", help="capture through BrowserOS neo if the view is stale")
+    ens.add_argument("--agent", required=True)
+    ens.add_argument("--route", default="/")
+    ens.add_argument("--viewport", default="1280x800")
+    ens.add_argument("--theme")
+    ens.add_argument("--state", default="default")
+    ens.add_argument("--force", action="store_true")
+    ens.add_argument("--url")
+
+    chk = sub.add_parser("check", help="compare the running UI with DESIGN.md")
+    chk.add_argument("--view")
+
     fgt = sub.add_parser("forget")
     fgt.add_argument("--view")
     fgt.add_argument("--before")
@@ -75,6 +87,11 @@ def main(argv: list[str] | None = None) -> int:
             _json(tools.tokens(args.project, args.view))
         elif args.command == "components":
             _json(tools.components(args.project, args.name, args.view))
+        elif args.command == "ensure":
+            _json(tools.ensure_capture(args.project, args.agent, args.route, args.viewport, args.theme,
+                                       args.state, args.force, args.url))
+        elif args.command == "check":
+            _json(tools.check_design(args.project, args.view))
         elif args.command == "forget":
             _json(tools.forget(args.project, args.view, args.before, args.everything))
     except (SpinePathError, SpineWriteError, imaging.ImageError, OSError) as exc:

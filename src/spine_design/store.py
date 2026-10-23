@@ -39,6 +39,11 @@ class Config:
     keep_per_view: int = 20
     mask: list[str] = field(default_factory=list)
     components: dict[str, str] = field(default_factory=dict)  # DESIGN.md name -> component key/selector
+    # Self-capture (D2): where the running UI is, how to know it rendered, how themes switch.
+    base_url: str = ""
+    wait_for: str = "body"
+    theme_attr: str = "data-theme"   # set on <html> per view theme; "" to use prefers-color-scheme only
+    allowed_hosts: list[str] = field(default_factory=lambda: ["127.0.0.1", "localhost", "::1"])
 
 
 def load_config(root: Path) -> Config:
@@ -50,7 +55,10 @@ def load_config(root: Path) -> Config:
     for name in ("pixels", "ttl_days", "cache_days", "keep_per_view"):
         if name in data:
             setattr(cfg, name, type(getattr(cfg, name))(data[name]))
-    for name in ("ui_paths", "mask"):
+    for name in ("base_url", "wait_for", "theme_attr"):
+        if isinstance(data.get(name), str):
+            setattr(cfg, name, data[name])
+    for name in ("ui_paths", "mask", "allowed_hosts"):
         if isinstance(data.get(name), list):
             setattr(cfg, name, [str(v) for v in data[name]])
     if isinstance(data.get("components"), dict):

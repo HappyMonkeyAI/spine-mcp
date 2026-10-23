@@ -8,9 +8,11 @@ plus, optionally, a screenshot. Measurements alone carry most of the value
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+from urllib.parse import urlparse
 
 from spine_core import git
 from spine_core.resolve import resolve_project
@@ -66,6 +68,7 @@ def record_capture(
     extraction: dict[str, Any] | str,
     image_path: str | None = None,
     image_base64: str | None = None,
+    adapter: str = "agent-supplied",
 ) -> dict[str, Any]:
     """Store one capture of a view: extract.js measurements, plus an optional screenshot."""
     _check_writable()
@@ -93,7 +96,7 @@ def record_capture(
         "view": target_view.as_dict(),
         "view_slug": target_view.slug,
         "agent": agent,
-        "adapter": "agent-supplied",
+        "adapter": adapter,
         "taken": taken.isoformat(),
         "sha": git.head(root),
         "ui_hash": store.ui_hash(files),
@@ -308,8 +311,11 @@ def design_brief(project: str | None, budget_tokens: int = 1200) -> dict[str, An
     footer = []
     if comps:
         footer += [f"\n## components (`{newest['view_slug']}`)", "- " + ", ".join(f"{c['key']}×{c['count']}" for c in comps)]
-    footer.append("\n_Detail: tokens / components / get_capture / diff_captures. "
-                  "DESIGN.md comparison (check_design) arrives in slice D2._")
+    drift = _drift_lines(root, cfg, latest)
+    if drift:
+        footer = drift + footer
+    footer.append("\n_Detail: tokens / components / get_capture / diff_captures / check_design. "
+                  "Refresh with ensure_capture._")
 
     def cost(parts: list[str]) -> int:
         return (len("\n".join(parts)) + 3) // 4
@@ -367,3 +373,131 @@ def forget(
         store.delete(root, record)
         removed += 1
     return {"removed": removed}
+
+
+# -- D2: self-capture and spec comparison ------------------------------------------
+
+
+def _parse_viewport(viewport: str | None) -> tuple[int, int] | None:
+    match = re.fullmatch(r"\s*(\d{2,5})\s*[x×]\s*(\d{2,5})\s*", viewport or "")
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def _latest_matching(root: Path, view: store.View) -> dict[str, Any] | None:
+    """Latest capture of a view; with theme "default", any theme (the page's own)."""
+    if view.theme != "default":
+        found = store.captures(root, view.slug)
+        return found[0] if found else None
+    for record in store.captures(root):
+        v = record["view"]
+        if (v["route"], v["viewport"], v["state"]) == (view.route, view.viewport, view.state):
+            return record
+    return None
+
+
+def ensure_capture(
+    project: str | None,
+    agent: str,
+    route: str = "/",
+    viewport: str = "1280x800",
+    theme: str | None = None,
+    state: str = "default",
+    force: bool = False,
+    url: str | None = None,
+    capture_fn: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
+    """Return a fresh capture of a view, taking one only when needed.
+
+    Fresh = no UI source file changed since the latest capture and it is younger
+    than ttl_days. Otherwise the server captures through BrowserOS neo itself
+    (pixels never pass through the agent). If BrowserOS is unavailable, the stale
+    capture comes back marked stale with the reason.
+    """
+    _check_writable()
+    agent = _check_agent(agent)
+    root = resolve_project(project)
+    cfg = store.load_config(root)
+    target = url or (cfg.base_url.rstrip("/") + "/" + route.lstrip("/") if cfg.base_url else "")
+    if not target:
+        raise SpineWriteError("no URL: set base_url in .agent/design/spine-design.toml, or pass url")
+    host = urlparse(target).hostname or ""
+    if host not in cfg.allowed_hosts:
+        raise SpineWriteError(f"{host!r} is not in allowed_hosts {cfg.allowed_hosts}; Spine Design only "
+                              "captures the project's own dev server unless the config allows more")
+    view = store.View(route, viewport or "default", theme or "default", state)
+    latest = _latest_matching(root, view)
+    if latest and not force:
+        fresh = _freshness(root, cfg, latest)
+        if fresh["state"] == "fresh":
+            return {"action": "reused", "capture": latest["id"], "view": latest["view"], "freshness": fresh}
+        reason = fresh["reason"]
+    else:
+        reason = "forced" if force else "no capture of this view yet"
+
+    from . import browseros
+    explicit_theme = theme if theme and theme != "default" else None
+    try:
+        captured = (capture_fn or browseros.capture)(
+            target, viewport=_parse_viewport(viewport), theme=explicit_theme,
+            theme_attr=cfg.theme_attr or None,
+            color_scheme=explicit_theme if explicit_theme in {"dark", "light"} else None,
+            wait_for=cfg.wait_for, pixels=cfg.pixels, mask=cfg.mask)
+    except browseros.AdapterError as exc:
+        if latest:
+            return {"action": "stale", "capture": latest["id"], "view": latest["view"], "reason": reason,
+                    "error": str(exc)[:300]}
+        raise SpineWriteError(f"could not capture {target}: {exc}") from exc
+    recorded = record_capture(str(root), agent, view.as_dict(), captured.extraction,
+                              image_base64=captured.png_base64, adapter="browseros")
+    notes = recorded.pop("notes", [])
+    if captured.skipped_pixels:
+        notes.append("screenshot skipped (BrowserOS rendered no frame for the background tab in time); "
+                     "measurements kept; force=true retries")
+    if not captured.ready:
+        notes.append(f"wait_for {cfg.wait_for!r} never matched; the page may not have rendered")
+    return {"action": "captured", "reason": reason, **recorded, "notes": notes, "timings_ms": captured.laps}
+
+
+def check_design(project: str | None, view: dict[str, Any] | str | None = None) -> dict[str, Any]:
+    """Compare the latest capture of each view (or one view) against DESIGN.md tokens."""
+    from . import check as checker
+    from .spec import load_spec
+
+    root = resolve_project(project)
+    spec = load_spec(root)
+    if spec is None:
+        return {"spec": None, "note": "no DESIGN.md with token frontmatter (colors/typography/rounded/spacing/"
+                                      "components); prose design docs are not compared"}
+    cfg = store.load_config(root)
+    records = [_resolve(root, view)] if view else _latest_per_view(root)
+    if not records:
+        return {"spec": spec.path, "note": "no captures yet: ensure_capture or record_capture first"}
+    views = {}
+    for record in records:
+        result = checker.check(record["extraction"], spec, cfg.components)
+        pct = result["summary"]["on_palette_pct"]
+        if pct is not None and pct < 50:
+            result["note"] = (f"only {pct}% of colour use matches {spec.path}'s palette: this theme "
+                              f"({record['view']['theme']}) is probably not documented there")
+        views[record["view_slug"]] = {"capture": record["id"], **result}
+    return {"spec": spec.path, "views": views}
+
+
+def _drift_lines(root: Path, cfg: store.Config, latest: list[dict[str, Any]]) -> list[str]:
+    """One line per view: how far the running UI is from DESIGN.md (cheap; no pixels)."""
+    from . import check as checker
+    from .spec import load_spec
+
+    spec = load_spec(root)
+    if spec is None:
+        return []
+    lines = [f"\n## vs {spec.path}"]
+    for record in sorted(latest, key=lambda r: r["view_slug"])[:4]:
+        s = checker.check(record["extraction"], spec, cfg.components)["summary"]
+        parts = [f"{s['on_palette_pct']}% colour use on palette" if s["on_palette_pct"] is not None else "no colours",
+                 f"{s['off_palette_colors']} off-palette colours",
+                 f"{s['font_sizes_off_scale']} font sizes and {s['radii_off_scale']} radii off scale"]
+        if s["components_checked"]:
+            parts.append(f"{s['components_differing']}/{s['components_checked']} mapped components differ")
+        lines.append(f"- `{record['view_slug']}`: " + ", ".join(parts))
+    return lines

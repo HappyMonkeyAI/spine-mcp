@@ -1,4 +1,4 @@
-"""MCP server for Spine Design (slice D1): visual memory and inventory for a running UI."""
+"""MCP server for Spine Design (slices D1-D2): visual memory and inventory for a running UI."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 import os
 from typing import Any
 
+import anyio
 from mcp.server.fastmcp import FastMCP, Image
 
 from spine_core.resolve import SpinePathError
@@ -15,7 +16,8 @@ from . import tools
 INSTRUCTIONS = """\
 Spine Design remembers what a project's running UI looks like, so you don't re-screenshot
 and re-read it every session. Start with design_brief(project=<absolute project path>).
-To add a capture: call extraction_script, run that JS in the page with your browser's
+ensure_capture(view) captures through BrowserOS neo only when the UI changed; check_design
+compares the running UI with DESIGN.md. To supply a capture yourself: call extraction_script, run that JS in the page with your browser's
 evaluate tool BEFORE screenshotting (it masks inputs/canvas and freezes animation), then
 call record_capture with its JSON (and a screenshot file path if your browser saves one).
 Answers are text; ask for pixels with get_capture(include_image=true) only when needed.
@@ -118,6 +120,35 @@ async def forget(project: str | None = None, view: str | None = None, before: st
     """Delete stored captures (retention / privacy): a view's, those before YYYY-MM-DD,
     or everything=True."""
     return tools.forget(_project(project), view, before, everything)
+
+
+@mcp.tool()
+async def ensure_capture(
+    agent: str,
+    project: str | None = None,
+    route: str = "/",
+    viewport: str = "1280x800",
+    theme: str | None = None,
+    state: str = "default",
+    force: bool = False,
+    url: str | None = None,
+) -> dict[str, Any]:
+    """Get a fresh capture of a view, taking one only when needed: reused if no UI
+    source file changed since the last capture, otherwise the server captures through
+    BrowserOS neo itself (no screenshot passes through you). theme e.g. "dark"/"light".
+    Needs base_url in .agent/design/spine-design.toml (or url). Only local hosts by default."""
+    return await anyio.to_thread.run_sync(
+        lambda: tools.ensure_capture(_project(project), agent, route, viewport, theme, state, force, url))
+
+
+@mcp.tool()
+async def check_design(project: str | None = None, view: str | None = None) -> dict[str, Any]:
+    """Compare the running UI (latest capture per view) with DESIGN.md tokens: % of colour
+    use on the palette, off-palette colours (with the CSS variable that produces them),
+    font sizes / radii / spacing off the spec's scales, fonts not in the spec, and each
+    DESIGN.md component's measured styles vs its spec (needs a [components] mapping or
+    data-component hooks). Facts with counts, not judgements."""
+    return tools.check_design(_project(project), view)
 
 
 @mcp.resource("spine-design://extract.js")
