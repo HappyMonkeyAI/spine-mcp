@@ -272,6 +272,8 @@ Acceptance (all covered by `tests/test_writes.py`):
 DynamicMCPProxy catalogue entry (`spine`), launcher-registry name resolution,
 opt-in PROGRESS.md rendering from `history/`, AgentsProtocol ADR + BOOTSTRAP step.
 
+**Design collector:** specified in [docs/specs/design-mcp.md](docs/specs/design-mcp.md) (Spine Design, slices D1–D4).
+
 ## 9. Seam for the UI Design MCP
 
 The design MCP reuses Spine core: project resolution, SHA anchoring and staleness,
