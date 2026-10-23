@@ -298,3 +298,15 @@ def test_section_adr_shorthand_whole_file_grep_and_recall_path(project: Path) ->
     assert [r["source"] for r in found] == ["apps/game/docs/smoke-test.md:5"]
     assert core.recall(str(project), "right-click preview", path="src")["results"] == []
     assert "- `apps/game` package scripts: typecheck, smoke" in core.session_brief(str(project), budget_tokens=6000)["brief"]
+
+
+def test_adr_status_is_its_first_line_not_its_history(project: Path) -> None:
+    write(project, "docs/adr/0001-terrain.md", "# ADR-0001: Terrain\n\n## Status\n\n**Accepted — option 1, 2026-10-16.**\n\n"
+                                               "_Previously: Proposed — awaiting decision._\n")
+    commit(project, "adr")
+    for i in range(5):
+        write(project, "src/world/stream.ts", f"export const x = {i + 20};\n")
+        commit(project, f"work {i}")
+    brief = core.session_brief(str(project), budget_tokens=6000)["brief"]
+    assert "0001: Terrain [Accepted — option 1, 2026-10-16]" in brief
+    assert "unchanged for" not in brief

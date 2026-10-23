@@ -554,7 +554,9 @@ def _adr_status(rows: list[Any]) -> str:
     """An ADR's status line: a `## Status` section, or a `- **Status:** X` preamble line."""
     status_row = next((r for r in rows if r["heading"].lower() == "status"), None)
     if status_row:
-        return _body(status_row["text"]).strip().replace("*", "")
+        # The first line is the status; later lines are history ("Previously: Proposed").
+        first = next((line for line in _body(status_row["text"]).split("\n") if line.strip()), "")
+        return first.strip().replace("*", "")
     found = re.search(r"Status:?\**:?\s*(.+)", rows[0]["text"]) if rows else None
     return found.group(1).replace("*", "").strip() if found else ""
 
