@@ -17,9 +17,15 @@ protocol ADR) is next.
 
 Measured on MRPGRealms (2026-10-23): brief ~2.4k tokens vs ~10k for protocol
 grounding (and a 55k-token `PROGRESS.md` no agent can read whole); cold build ~1.9 s.
-In an independent cold-start eval, a fresh agent scored 8/20 from the brief alone and 16/20 with
-the brief plus Spine tools, with no confidently wrong answers
-([eval](docs/evals/2026-10-23-mrpgrealms-cold-start.md)).
+Independent cold-start evals (separate question writer and grader, no confidently wrong answers):
+
+| Project | Brief only | Brief + tools |
+|---|---|---|
+| xeno-gate-tactical (held out: new questions, nothing tuned on it) | 6/20 | **18/20** |
+| MRPGRealms (round 2, questions reused) | 8/20 | 16/20 |
+
+Details: [xeno-gate-tactical](docs/evals/2026-10-23-xeno-gate-tactical-cold-start.md) ·
+[MRPGRealms](docs/evals/2026-10-23-mrpgrealms-cold-start.md).
 
 ## Tools
 
