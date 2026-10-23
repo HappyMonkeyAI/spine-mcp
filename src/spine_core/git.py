@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -57,6 +58,36 @@ def worktrees(root: Path) -> list[dict[str, str]]:
             current["branch"] = value.removeprefix("refs/heads/")
     main = root.resolve()
     return [t for t in trees if Path(t.get("path", "")).resolve() != main]
+
+
+MERGE_RE = re.compile(r"Merge (?:pull request #(\d+) from [^/\s]+/(\S+)|branch '([^']+)')")
+
+
+def recent_merges(root: Path, limit: int = 200) -> list[dict[str, str]]:
+    """Merges on the current branch's first-parent line, newest first.
+
+    Git is the truth for "did it ship": journals and task boards often still
+    say "in review" after a PR merged.
+    """
+    out = run_git(root, "log", "--first-parent", "--merges", f"-{limit}", "--format=%h%x1f%cs%x1f%s%x1f%b%x1e")
+    merges = []
+    for record in (out or "").split("\x1e"):
+        fields = record.strip("\n").split("\x1f")
+        if len(fields) < 4:
+            continue
+        sha, date, subject, body = fields
+        match = MERGE_RE.match(subject)
+        if not match:
+            continue
+        pr, pr_branch, plain_branch = match.groups()
+        merges.append({
+            "sha": sha,
+            "date": date,
+            "pr": pr or "",
+            "branch": pr_branch or plain_branch,
+            "title": body.strip().split("\n", 1)[0] if body.strip() else subject,
+        })
+    return merges
 
 
 def tracked_files(root: Path) -> list[str]:

@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from spine_core import git
 from spine_core.anchors import staleness
 from spine_core.index import MEMORY_KINDS, SpineIndex
-from spine_core.markdown import bullets, checkboxes, sections
+from spine_core.markdown import blocks, bullets, checkboxes, sections
 from spine_core.resolve import SpinePathError, resolve_project, safe_path, to_posix
 
 OVERSIZED_TOKENS = 8000
 CLOSED_STATUSES = {"complete", "completed", "done", "merged", "accepted", "cancelled", "abandoned"}
-RULE_HEADINGS = ("non-negotiable", "what not to do", "do not", "guardrail")
+RULE_HEADINGS = ("non-negotiable", "what not to do", "do not", "guardrail", "override", "safety", "worktree")
+# Where hard rules live: the project context plus every agent's instruction file.
+RULE_FILES = ("CONTEXT.md", "AGENTS.md", "CLAUDE.md", "HERMES.md", "GEMINI.md", "GROK.md")
 
 
 def tokens(text: str) -> int:
@@ -81,26 +84,51 @@ def tasks(project: str | None = None, status: str | None = None) -> dict[str, An
 # -- sections and recall -------------------------------------------------
 
 
-def get_section(project: str | None, path: str, heading: str) -> dict[str, Any]:
-    """Return one `##` section of a project markdown file."""
+def get_section(
+    project: str | None,
+    path: str,
+    heading: str = "",
+    grep: str | None = None,
+    max_tokens: int = 2000,
+) -> dict[str, Any]:
+    """Return one `##` section of a project markdown file.
+
+    An empty heading returns the file's outline (headings, lines, sizes).
+    `grep` keeps only the bullets/paragraphs that mention every given word,
+    for sections too big to read whole. Output is capped at `max_tokens`.
+    """
     root = resolve_project(project)
     target = safe_path(root, path)
     if not target.is_file():
         raise SpinePathError(f"no such file: {path}")
     _, parts = sections(target.read_text(encoding="utf-8", errors="replace"))
+    rel = to_posix(root, target)
+    outline = [{"heading": p.heading, "line": p.line_start, "tokens": tokens(p.text)} for p in parts]
     wanted = heading.strip().lower().lstrip("#").strip()
+    if not wanted:
+        return {"found": True, "path": rel, "outline": outline}
     match = next((p for p in parts if p.heading.lower() == wanted), None) or next(
         (p for p in parts if wanted in p.heading.lower()), None
     )
-    rel = to_posix(root, target)
     if match is None:
-        return {"found": False, "path": rel, "headings": [p.heading for p in parts]}
+        return {"found": False, "path": rel, "outline": outline}
+
+    text = match.text
+    if grep:
+        words = [w.lower() for w in grep.split()]
+        kept = [b for b in blocks(_body(text)) if all(w in b.lower() for w in words)]
+        text = "\n".join(kept) if kept else f"(no bullet or paragraph in this section mentions {grep!r})"
+    full = tokens(text)
+    truncated = full > max_tokens
+    if truncated:
+        text = text[: max_tokens * 4].rsplit("\n", 1)[0] + "\n… (truncated; narrow with grep)"
     return {
         "found": True,
         "source": f"{rel}:{match.line_start}-{match.line_end}",
         "heading": match.heading,
-        "tokens": tokens(match.text),
-        "text": match.text,
+        "tokens": tokens(text),
+        "truncated_from": full if truncated else None,
+        "text": text,
     }
 
 
@@ -168,18 +196,20 @@ def audit(project: str | None = None) -> dict[str, Any]:
 # -- session brief -------------------------------------------------------
 
 
-def session_brief(project: str | None = None, focus: str | None = None, budget_tokens: int = 1500) -> dict[str, Any]:
+def session_brief(project: str | None = None, focus: str | None = None, budget_tokens: int = 2000) -> dict[str, Any]:
     """Warm-start brief: git state, last checkpoint, open tasks, recent journal,
     rules, focus hits, doc map, warnings. Sections that do not fit the budget
     are dropped whole and named in `omitted`.
     """
     with open_index(project) as index:
         root = index.root
+        merges = git.recent_merges(root)
         candidates: list[tuple[str, str]] = [
             ("git", _git_section(root)),
+            ("recently merged", _merges_section(merges)),
             ("last checkpoint", _checkpoint_section(index)),
-            ("open tasks", _tasks_section(project or str(root))),
-            ("recent journal", _journal_section(index)),
+            ("open tasks", _tasks_section(project or str(root), merges)),
+            ("recent journal", _journal_section(index, merges)),
             ("rules", _rules_section(index)),
         ]
         if focus:
@@ -229,8 +259,40 @@ def _git_section(root: Path) -> str:
         lines.append("  - " + ", ".join(f"`{p}`" for p in dirty[:6]) + (" …" if len(dirty) > 6 else ""))
     for tree in git.worktrees(root)[:6]:
         name = Path(tree["path"]).name
-        lines.append(f"- worktree `{name}` on `{tree.get('branch', '(detached)')}`")
+        branch = tree.get("branch")
+        tip = git.run_git(root, "log", "-1", "--format=%cs %s", branch) if branch else None
+        lines.append(
+            f"- worktree `{name}` on `{branch or '(detached)'}`" + (f" — tip: {clip(tip, 120)}" if tip else "")
+        )
     return "\n".join(lines)
+
+
+def _merges_section(merges: list[dict[str, str]]) -> str:
+    """Git is the record of what shipped; journals and boards lag behind it."""
+    return "\n".join(
+        f"- {m['date']} " + (f"#{m['pr']} " if m["pr"] else "")
+        + f"`{m['branch']}` — {clip(m['title'], 110)} ({m['sha']})"
+        for m in merges[:5]
+    )
+
+
+def _merged(merges: list[dict[str, str]], text: str) -> dict[str, str] | None:
+    """The merge whose branch is named in text (whole name: armies-s4 is not armies-s4b)."""
+    for merge in merges:
+        if re.search(re.escape(merge["branch"]) + r"(?![\w./-])", text):
+            return merge
+    return None
+
+
+def clip_sentence(text: str, limit: int) -> str:
+    """Clip at a sentence or clause boundary, so the clause that answers the
+    question isn't cut in half."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    cut = max(head.rfind(". "), head.rfind("; "), head.rfind(": "))
+    return (head[: cut + 1] if cut > limit // 4 else head.rstrip()) + " …"
 
 
 def _checkpoint_section(index: SpineIndex) -> str:
@@ -255,40 +317,68 @@ def _checkpoint_section(index: SpineIndex) -> str:
     return "\n".join(lines)
 
 
-def _tasks_section(project: str) -> str:
+def _tasks_section(project: str, merges: list[dict[str, str]]) -> str:
     view = tasks(project)
     lines = []
     open_board = [t for t in view["board"] if str(t.get("status", "")).lower() not in CLOSED_STATUSES]
+    # A board entry whose branch already merged is stale, not open work.
+    stale = [(t, m) for t in open_board if t.get("branch") and (m := _merged(merges, str(t["branch"])))]
+    open_board = [t for t in open_board if all(t is not s for s, _ in stale)]
     for task in open_board[:8]:
         where = task.get("branch") or task.get("worktree") or ""
         lines.append(f"- [{task.get('status', '?')}] `{task.get('id', '?')}` {clip(str(task.get('title', '')), 90)}"
                      + (f" ({where})" if where else ""))
     if len(open_board) > 8:
         lines.append(f"- … {len(open_board) - 8} more on `.agent-tasks.json`")
+    if stale:
+        lines.append("- board is stale: " + ", ".join(
+            f"`{t.get('id')}` says {t.get('status')} but merged #{m['pr'] or m['sha']}" for t, m in stale[:4]
+        ))
     shown = 0
     for heading, items in view["checklist"].items():
         for item in items:
-            if item["done"] or shown >= 6:
+            if item["done"] or shown >= 5:
                 continue
-            lines.append(f"- {clip(item['text'], 140)} ({item['source']})")
+            lines.append(f"- {clip_sentence(item['text'], 260)} ({item['source']})")
             shown += 1
     return "\n".join(lines)
 
 
-def _journal_section(index: SpineIndex) -> str:
-    return "\n".join(f"- {clip(r['heading'], 110)} ({r['path']}:{r['line_start']})" for r in index.journal(5))
+def _journal_section(index: SpineIndex, merges: list[dict[str, str]]) -> str:
+    lines = []
+    for row in index.journal(5):
+        merge = _merged(merges, row["heading"])
+        mark = f" — merged #{merge['pr'] or merge['sha']}" if merge else ""
+        lines.append(f"- {clip(row['heading'], 110)}{mark} ({row['path']}:{row['line_start']})")
+    return "\n".join(lines)
+
+
+def _subsections(heading: str, text: str) -> list[tuple[str, str]]:
+    """A `##` chunk split on its `### ` subheadings: [(heading, body), ...]."""
+    out = [(heading, [])]
+    for line in _body(text).split("\n"):
+        if line.startswith("### "):
+            out.append((line[4:].strip(), []))
+        else:
+            out[-1][1].append(line)
+    return [(h, "\n".join(body)) for h, body in out]
 
 
 def _rules_section(index: SpineIndex) -> str:
+    """Every hard rule as a short headline: an agent can't follow a rule it was
+    never shown, so breadth beats detail here (get_section/grep has the detail)."""
     lines = []
-    for row in index.chunks(path="CONTEXT.md"):
-        if not any(key in row["heading"].lower() for key in RULE_HEADINGS):
-            continue
-        rules = bullets(row["text"])
-        lines.append(f"- **{row['heading']}** (CONTEXT.md:{row['line_start']}, {len(rules)} rules)")
-        lines += [f"  - {clip(rule, 100)}" for rule in rules[:8]]
-        if len(rules) > 8:
-            lines.append(f"  - … get_section('CONTEXT.md', '{row['heading']}')")
+    for path in RULE_FILES:
+        for row in index.chunks(path=path):
+            for heading, body in _subsections(row["heading"], row["text"]):
+                if not any(key in heading.lower() for key in RULE_HEADINGS):
+                    continue
+                rules = bullets(body)
+                if not rules:
+                    continue
+                width = 100 if len(rules) <= 8 else 64
+                lines.append(f"- **{heading}** ({path}:{row['line_start']}, {len(rules)} rules)")
+                lines += [f"  - {clip(rule.replace('**', ''), width)}" for rule in rules[:30]]
     return "\n".join(lines)
 
 

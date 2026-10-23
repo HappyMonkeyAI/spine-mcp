@@ -263,16 +263,19 @@ class SpineIndex:
         if not terms:
             return []
         quoted = [f'"{t}"' for t in terms]
-        # Every term first; if that finds nothing, any term.
-        for match in (" ".join(quoted), " OR ".join(quoted)):
-            hits = self._search(match, kinds, since, limit)
-            if hits or len(terms) == 1:
-                return hits
-        return []
+        # Chunks matching every term rank first; top up with any-term matches.
+        hits = self._search(" ".join(quoted), kinds, since, limit)
+        if len(hits) < limit and len(terms) > 1:
+            seen = {(h.path, h.line_start) for h in hits}
+            hits += [
+                h for h in self._search(" OR ".join(quoted), kinds, since, limit)
+                if (h.path, h.line_start) not in seen
+            ][: limit - len(hits)]
+        return hits
 
     def _search(self, match: str, kinds: list[str] | None, since: str | None, limit: int) -> list[Hit]:
         sql = (
-            "SELECT c.*, snippet(chunks_fts, 1, '[', ']', ' … ', 24) AS snip"
+            "SELECT c.*, snippet(chunks_fts, 1, '[', ']', ' … ', 48) AS snip"
             " FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid"
             " WHERE chunks_fts MATCH ?"
         )

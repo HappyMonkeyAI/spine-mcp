@@ -21,12 +21,14 @@ def main(argv: list[str] | None = None) -> int:
 
     brief = sub.add_parser("brief", help="print the session brief (SessionStart hook)")
     brief.add_argument("--focus")
-    brief.add_argument("--budget", type=int, default=1500)
+    brief.add_argument("--budget", type=int, default=2000)
     brief.add_argument("--hook", action="store_true", help="never fail: print nothing on error")
 
-    section = sub.add_parser("section", help="print one ## section of a file")
+    section = sub.add_parser("section", help="print one ## section of a file (no heading: outline)")
     section.add_argument("path")
-    section.add_argument("heading")
+    section.add_argument("heading", nargs="?", default="")
+    section.add_argument("--grep", help="keep only bullets/paragraphs mentioning every word")
+    section.add_argument("--max-tokens", type=int, default=2000)
 
     rec = sub.add_parser("recall", help="search the spine")
     rec.add_argument("query")
@@ -43,8 +45,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "brief":
             print(core.session_brief(args.project, focus=args.focus, budget_tokens=args.budget)["brief"])
         elif args.command == "section":
-            result = core.get_section(args.project, args.path, args.heading)
-            print(result["text"] if result["found"] else json.dumps(result, indent=2))
+            result = core.get_section(
+                args.project, args.path, args.heading, grep=args.grep, max_tokens=args.max_tokens
+            )
+            if result["found"] and "text" in result:
+                print(result["text"])
+            else:
+                _json(result)
         elif args.command == "recall":
             _json(core.recall(args.project, args.query, kinds=args.kinds, since=args.since, limit=args.limit))
         elif args.command == "tasks":

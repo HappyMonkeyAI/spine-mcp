@@ -35,7 +35,7 @@ def _project(project: str | None) -> str:
 
 
 @mcp.tool()
-async def session_brief(project: str | None = None, focus: str | None = None, budget_tokens: int = 1500) -> dict[str, Any]:
+async def session_brief(project: str | None = None, focus: str | None = None, budget_tokens: int = 2000) -> dict[str, Any]:
     """Warm-start brief for a project: git state, last checkpoint, open tasks,
     recent journal, rules, doc map and warnings, cut to a token budget.
     Call this first instead of reading README/CONTEXT/PROGRESS."""
@@ -43,9 +43,17 @@ async def session_brief(project: str | None = None, focus: str | None = None, bu
 
 
 @mcp.tool()
-async def get_section(path: str, heading: str, project: str | None = None) -> dict[str, Any]:
-    """Return one `##` section of a project markdown file (e.g. CONTEXT.md, 'Non-negotiables')."""
-    return core.get_section(_project(project), path, heading)
+async def get_section(
+    path: str,
+    heading: str = "",
+    project: str | None = None,
+    grep: str | None = None,
+    max_tokens: int = 2000,
+) -> dict[str, Any]:
+    """Return one `##` section of a project markdown file (e.g. CONTEXT.md, 'Non-negotiables').
+    Empty heading → the file's outline. Heading matches exactly, else by substring.
+    grep="terrain version" keeps only bullets/paragraphs mentioning every word (for huge sections)."""
+    return core.get_section(_project(project), path, heading, grep=grep, max_tokens=max_tokens)
 
 
 @mcp.tool()

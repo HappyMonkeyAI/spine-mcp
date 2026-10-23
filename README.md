@@ -13,15 +13,18 @@ Files stay the source of truth. The index is a self-ignoring cache in
 **Slice S1 (read-only) built.** Writes (`checkpoint`, `record_memory`, `distill`)
 and the SessionEnd/Stop hooks are slice S2.
 
-Measured on MRPGRealms (2026-10-23): brief 1,265 tokens vs ~10k for protocol
-grounding (and a 54k-token `PROGRESS.md` no agent can read whole); cold build ~1.9 s.
+Measured on MRPGRealms (2026-10-23): brief ~1.9k tokens vs ~10k for protocol
+grounding (and a 55k-token `PROGRESS.md` no agent can read whole); cold build ~1.9 s.
+In an independent cold-start eval, a fresh agent scored 8/20 from the brief alone and 16/20 with
+the brief plus Spine tools, with no confidently wrong answers
+([eval](docs/evals/2026-10-23-mrpgrealms-cold-start.md)).
 
 ## Tools
 
 | Tool | Purpose |
 |---|---|
-| `session_brief(project?, focus?, budget_tokens=1500)` | Git state, last checkpoint, open tasks, recent journal, rules, doc map, warnings |
-| `get_section(path, heading, project?)` | One `##` section of a file |
+| `session_brief(project, focus?, budget_tokens=2000)` | Git state, recent merges, last checkpoint, open tasks (stale ones flagged), recent journal, every hard rule, doc map, warnings |
+| `get_section(path, heading?, project, grep?, max_tokens=2000)` | One `##` section; no heading = outline; `grep` filters huge sections |
 | `recall(query, project?, kinds?, since?, limit=8)` | FTS5 search; memory hits carry a staleness line |
 | `tasks(project?, status?)` | Read-only merge of `.agent-tasks.json` and `TASKS.md` |
 | `audit(project?)` | Truth Audit: stale/broken memories, oversized docs, undistilled journal |

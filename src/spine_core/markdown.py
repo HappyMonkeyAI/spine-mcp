@@ -100,5 +100,21 @@ def checkboxes(text: str) -> list[tuple[int, bool, str]]:
     return items
 
 
+def blocks(text: str) -> list[str]:
+    """Top-level bullets (with their continuation lines) and paragraphs."""
+    out: list[list[str]] = []
+    for line in normalise(text).split("\n"):
+        if not line.strip():
+            if out and out[-1]:
+                out.append([])
+            continue
+        starts_item = re.match(r"([-*]|\d+\.) ", line) is not None
+        if starts_item or not out or not out[-1]:
+            out.append([line])
+        else:
+            out[-1].append(line)
+    return ["\n".join(b) for b in out if b]
+
+
 def bullets(text: str) -> list[str]:
     return [m.group(1).strip() for m in re.finditer(r"^[-*] (.+)$", normalise(text), re.M)]

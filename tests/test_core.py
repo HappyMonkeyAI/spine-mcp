@@ -77,7 +77,7 @@ def test_get_section_exact_then_substring(project: Path) -> None:
     result = core.get_section(str(project), "CONTEXT.md", "non-neg")
     assert result["found"] and "Never write source files" in result["text"]
     missing = core.get_section(str(project), "CONTEXT.md", "nope")
-    assert not missing["found"] and "Runtime" in missing["headings"]
+    assert not missing["found"] and "Runtime" in [o["heading"] for o in missing["outline"]]
 
 
 def test_tasks_merges_board_and_checklist(project: Path) -> None:
@@ -149,3 +149,45 @@ def test_mcp_tools_refuse_to_guess_the_project(monkeypatch: pytest.MonkeyPatch, 
     monkeypatch.setenv("SPINE_PROJECT", str(project))
     assert server._project(None) == str(project)
     assert "Spine brief" in server.brief_resource()
+
+
+def _merge_branch(project: Path, branch: str, pr: int, title: str) -> None:
+    from conftest import git
+    git(project, "checkout", "-q", "-b", branch)
+    write(project, f"src/{branch.replace('/', '_')}.ts", "x\n")
+    commit(project, f"feat: {title}")
+    git(project, "checkout", "-q", "main")
+    git(project, "merge", "-q", "--no-ff", branch, "-m",
+        f"Merge pull request #{pr} from Org/{branch}", "-m", title)
+
+
+def test_brief_trusts_git_merges_over_stale_labels(project: Path) -> None:
+    write(project, "PROGRESS.md",
+          "# Progress\n\n## 2026-10-22 — final siege (agent/crown, in review)\n\n- crown\n\n"
+          "## 2026-10-21 — armies (agent/armies-s4b, in review)\n\n- s4b\n")
+    commit(project, "journal")
+    _merge_branch(project, "agent/crown", 83, "The final siege and the crown")
+    _merge_branch(project, "agent/armies-s4", 70, "Armies S4")
+    brief = core.session_brief(str(project), budget_tokens=5000)["brief"]
+    assert "#83 `agent/crown` — The final siege and the crown" in brief
+    assert "final siege (agent/crown, in review) — merged #83" in brief
+    # armies-s4 merged, armies-s4b did not: no prefix false positive.
+    assert "(agent/armies-s4b, in review) (" in brief
+    # The board's in_progress `crown` task is now flagged stale, not listed as open.
+    assert "`crown` says in_progress but merged #83" in brief
+    assert "[in_progress] `crown`" not in brief
+
+
+def test_clip_sentence_keeps_whole_clauses() -> None:
+    text = "Line of sight uses floor(y). A straight fix would make steps block sight; mobs would flicker."
+    assert core.clip_sentence(text, 70) == "Line of sight uses floor(y). …"
+    assert core.clip_sentence(text, 500) == text
+
+
+def test_get_section_outline_grep_and_cap(project: Path) -> None:
+    outline = core.get_section(str(project), "CONTEXT.md")["outline"]
+    assert [o["heading"] for o in outline] == ["Context", "Runtime", "Non-negotiables"]
+    hit = core.get_section(str(project), "CONTEXT.md", "Non-negotiables", grep="plain files")
+    assert hit["text"] == "- Keep state in plain files"
+    capped = core.get_section(str(project), "CONTEXT.md", "Non-negotiables", max_tokens=5)
+    assert capped["truncated_from"] and "truncated" in capped["text"]
