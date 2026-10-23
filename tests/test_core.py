@@ -207,3 +207,27 @@ def test_git_children_never_inherit_stdin(project: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr(spine_git.subprocess, "run", spy)
     assert spine_git.head(project)
     assert seen["stdin"] is subprocess.DEVNULL
+
+
+def test_clip_rule_keeps_conventions_clipping_would_drop() -> None:
+    rule = ("Use branch mode for implementation work: one integration feature branch plus one isolated "
+            "worktree per task under `.worktrees/<task-id>` on `agent/<task-id>`.")
+    out = core.clip_rule(rule, 64)
+    assert out.endswith("[`.worktrees/<task-id>`, `agent/<task-id>`]")
+    assert core.clip_rule("Short rule with `x_y`.", 64) == "Short rule with `x_y`."
+
+
+def test_brief_has_verify_commands_adr_index_and_stale_plan_warning(project: Path) -> None:
+    write(project, "AGENTS.md", "# Agents\n\n## Verification\n\n```bash\nnpm run typecheck && npm test\n# comment\n```\n")
+    write(project, "docs/adr/0002-worktrees.md", "# ADR 0002: Worktree coordination\n\n## Status\n\nAccepted — 2026-09-05\n\n## Decision\n\nUse worktrees.\n")
+    write(project, "docs/adr/0003-terrain.md", "# ADR-0003: Terrain v2\n\n## Status\n\n**Proposed — awaiting decision.**\n")
+    commit(project, "docs")
+    from test_core import _merge_branch  # noqa: F401  (same module; keeps the helper local)
+    for n, name in enumerate(("a", "b", "c"), start=1):
+        _merge_branch(project, f"agent/{name}", n, f"Feature {name}")
+    brief = core.session_brief(str(project), budget_tokens=6000)["brief"]
+    assert "- from AGENTS.md:3 (Verification)\n  - `npm run typecheck && npm test`" in brief
+    assert "comment" not in brief.split("## verify", 1)[1].split("##", 1)[0]
+    adrs = brief.split("## decisions (ADRs)", 1)[1]
+    assert adrs.index("0003: Terrain v2 [Proposed]") < adrs.index("0002: Worktree coordination [Accepted]")
+    assert "`TASKS.md` last changed" in brief and "3 merges ago" in brief

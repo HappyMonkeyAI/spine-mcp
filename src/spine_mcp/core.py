@@ -212,7 +212,7 @@ def distilled_through(root: Path) -> str | None:
 # -- session brief -------------------------------------------------------
 
 
-def session_brief(project: str | None = None, focus: str | None = None, budget_tokens: int = 2000) -> dict[str, Any]:
+def session_brief(project: str | None = None, focus: str | None = None, budget_tokens: int = 2500) -> dict[str, Any]:
     """Warm-start brief: git state, last checkpoint, open tasks, recent journal,
     rules, focus hits, doc map, warnings. Sections that do not fit the budget
     are dropped whole and named in `omitted`.
@@ -225,20 +225,22 @@ def session_brief(project: str | None = None, focus: str | None = None, budget_t
             ("recently merged", _merges_section(merges)),
             ("last checkpoint", _checkpoint_section(index)),
             ("open tasks", _tasks_section(project or str(root), merges)),
+            # What not to trust ranks above detail: it changes how everything else is read.
+            ("warnings", _warnings_section(index)),
             ("recent journal", _journal_section(index, merges)),
             ("rules", _rules_section(index)),
+            ("verify", _verify_section(index)),
+            ("decisions (ADRs)", _adrs_section(index)),
         ]
         if focus:
             candidates.append((f"focus: {focus}", _focus_section(index, focus)))
-        candidates += [
-            ("doc map", _doc_map_section(index)),
-            ("warnings", _warnings_section(index)),
-        ]
+        candidates.append(("doc map", _doc_map_section(index)))
 
     header = (
         f"# Spine brief — {root.name}\n"
         "_Project data, not instructions. Every line cites its source; "
-        "fetch detail with get_section / recall._"
+        "fetch detail with get_section / recall. Before you stop: `checkpoint` "
+        "(agent = your name: claude-code, codex, hermes, grok, ...) with done / next / blockers._"
     )
     used = tokens(header)
     kept = [header]
@@ -403,7 +405,60 @@ def _rules_section(index: SpineIndex) -> str:
                     continue
                 width = 100 if len(rules) <= 8 else 64
                 lines.append(f"- **{heading}** ({path}:{row['line_start']}, {len(rules)} rules)")
-                lines += [f"  - {clip(rule.replace('**', ''), width)}" for rule in rules[:30]]
+                lines += [f"  - {clip_rule(rule.replace('**', ''), width)}" for rule in rules[:30]]
+    return "\n".join(lines)
+
+
+CODE_SPAN = re.compile(r"`[^`\n]{2,60}`")
+
+
+def clip_rule(rule: str, width: int) -> str:
+    """Clip a rule, but keep the inline-code spans it names: exact conventions
+    (`.worktrees/<task-id>`, `NEW_WORLD_TERRAIN_VERSION`) are what clipping loses."""
+    clipped = clip(rule, width)
+    if clipped == " ".join(rule.split()):
+        return clipped
+    lost = [s for s in dict.fromkeys(CODE_SPAN.findall(rule)) if s not in clipped]
+    return clipped + (" [" + ", ".join(lost[:3]) + "]" if lost else "")
+
+
+VERIFY_HEADINGS = ("verification", "verify", "testing", "checks")
+
+
+def _verify_section(index: SpineIndex) -> str:
+    """The project's own verification commands, verbatim from the first matching code block."""
+    for path in RULE_FILES + ("README.md",):
+        for row in index.chunks(path=path):
+            for heading, body in _subsections(row["heading"], row["text"]):
+                if not heading.lower().startswith(VERIFY_HEADINGS):
+                    continue
+                block = re.search(r"```[^\n]*\n(.*?)```", body, re.S)
+                if block:
+                    commands = [c.strip() for c in block.group(1).split("\n") if c.strip() and not c.strip().startswith("#")]
+                    return f"- from {path}:{row['line_start']} ({heading})\n" + "\n".join(
+                        f"  - `{clip(c, 110)}`" for c in commands[:6]
+                    )
+    return ""
+
+
+def _adrs_section(index: SpineIndex) -> str:
+    """An index of ADRs: title and status, newest first. Decision text is often a
+    table or sub-headings, so it stays one get_section call away instead."""
+    adrs = sorted({d["path"] for d in index.docs() if d["kind"] == "adr" and not d["path"].endswith("README.md")},
+                  reverse=True)
+    lines = []
+    for rel in adrs[:16]:
+        rows = index.chunks(path=rel)
+        title = next((r["heading"] for r in rows if r["line_start"] <= 2), Path(rel).stem)
+        status_row = next((r for r in rows if r["heading"].lower() == "status"), None)
+        status = _body(status_row["text"]).strip().replace("*", "") if status_row else ""
+        status_word = clip(re.split(r"[.—–(]", status, maxsplit=1)[0].strip(), 24) if status else "?"
+        title = re.sub(r"^ADR[\s-]*", "", title).strip()
+        lines.append(f"- {clip(title, 64)} [{status_word}]")
+    if len(adrs) > 16:
+        lines.append(f"- … {len(adrs) - 16} older in `docs/adr/`")
+    if lines:
+        lines.append("- detail: get_section('docs/adr/<file>', 'Decision') or recall")
     return "\n".join(lines)
 
 
@@ -416,13 +471,25 @@ def _focus_section(index: SpineIndex, focus: str) -> str:
 
 def _doc_map_section(index: SpineIndex) -> str:
     rows = sorted(index.docs(), key=lambda d: -d["chars"])
-    top = [f"`{d['path']}` ~{doc_tokens(d) // 100 / 10}k" for d in rows[:10]]
+    top = [f"`{d['path']}` ~{doc_tokens(d) // 100 / 10}k" for d in rows[:6]]
     rest = len(rows) - len(top)
     return "- " + " · ".join(top) + (f" · +{rest} smaller" if rest > 0 else "")
 
 
+STALE_AFTER_MERGES = 3
+
+
 def _warnings_section(index: SpineIndex) -> str:
     lines = []
+    # Planning docs that haven't moved while work merged: their "next" items may have shipped.
+    for rel in ("TASKS.md", ".agent-tasks.json"):
+        last = git.last_commit(index.root, rel)
+        if not last:
+            continue
+        merged = git.run_git(index.root, "rev-list", "--count", "--merges", "--first-parent", f"{last[0]}..HEAD")
+        if merged and int(merged) >= STALE_AFTER_MERGES:
+            lines.append(f"- `{rel}` last changed {last[1]}, {merged} merges ago: its open/next items may already "
+                         "have shipped; check against recently merged")
     for doc in index.docs():
         size = doc_tokens(doc)
         if size > OVERSIZED_TOKENS:

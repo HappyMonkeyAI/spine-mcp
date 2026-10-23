@@ -15,7 +15,7 @@ uncommitted for you to commit with the work. The index is a self-ignoring cache 
 **Slices S1 (read) and S2 (write) built.** S3 (proxy catalogue, registry resolution,
 protocol ADR) is next.
 
-Measured on MRPGRealms (2026-10-23): brief ~1.9k tokens vs ~10k for protocol
+Measured on MRPGRealms (2026-10-23): brief ~2.4k tokens vs ~10k for protocol
 grounding (and a 55k-token `PROGRESS.md` no agent can read whole); cold build ~1.9 s.
 In an independent cold-start eval, a fresh agent scored 8/20 from the brief alone and 16/20 with
 the brief plus Spine tools, with no confidently wrong answers
@@ -25,7 +25,7 @@ the brief plus Spine tools, with no confidently wrong answers
 
 | Tool | Purpose |
 |---|---|
-| `session_brief(project, focus?, budget_tokens=2000)` | Git state, recent merges, last checkpoint, open tasks (stale ones flagged), recent journal, every hard rule, doc map, warnings |
+| `session_brief(project, focus?, budget_tokens=2500)` | Git state, recent merges, last checkpoint + commits since, open tasks (stale ones flagged), warnings (stale planning docs), recent journal, every hard rule (exact `code` conventions kept), verify commands, ADR index, doc map |
 | `get_section(path, heading?, project, grep?, max_tokens=2000)` | One `##` section; no heading = outline; `grep` filters huge sections |
 | `recall(query, project?, kinds?, since?, limit=8)` | FTS5 search; memory hits carry a staleness line |
 | `tasks(project?, status?)` | Read-only merge of `.agent-tasks.json` and `TASKS.md` |

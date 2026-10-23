@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
 
     brief = sub.add_parser("brief", help="print the session brief (SessionStart hook)")
     brief.add_argument("--focus")
-    brief.add_argument("--budget", type=int, default=2000)
+    brief.add_argument("--budget", type=int, default=2500)
     brief.add_argument("--hook", action="store_true",
                        help="hook mode: read the hook's JSON on stdin, record the session start, never fail")
 
