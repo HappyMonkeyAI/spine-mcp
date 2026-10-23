@@ -5,7 +5,8 @@
 - Python 3.11+ (`tomllib`), `uv`.
 - MCP via `mcp.server.fastmcp.FastMCP`, pinned `mcp<2` (2.x renamed it `MCPServer`; siblings are on 1.x).
 - SQLite FTS5 index at `<project>/.agent/spine/index.sqlite`, self-ignored by a `*` `.gitignore` in that folder.
-- `spine_core/` is collector-neutral (resolve, git, markdown, index, anchors, scrub) so the UI design collector can reuse it.
+- `spine_core/` is collector-neutral (resolve, git, markdown, index, anchors, scrub); `spine_design/` (the second server) reuses it.
+- `spine_design/` needs Pillow; screenshots are stored as lossless webp under `<project>/.agent/design/cache/` (self-ignored, per host).
   `spine_mcp/core.py` holds the read tools, `writes.py` the write tools; `server.py` and `cli.py` are thin wrappers.
 
 ## Non-negotiables

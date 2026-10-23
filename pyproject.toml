@@ -7,11 +7,14 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "mcp>=1.0.0,<2",  # 2.x renamed FastMCP to MCPServer; siblings are still on 1.x
+    "Pillow>=10",     # spine-design: image validation, webp, diffs, crops
 ]
 
 [project.scripts]
 spine-mcp = "spine_mcp.server:main"
 spine = "spine_mcp.cli:main"
+spine-design-mcp = "spine_design.server:main"
+spine-design = "spine_design.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -26,4 +29,4 @@ dev = [
 pythonpath = ["src"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/spine_core", "src/spine_mcp"]
+packages = ["src/spine_core", "src/spine_mcp", "src/spine_design"]

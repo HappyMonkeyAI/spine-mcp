@@ -12,7 +12,7 @@ uncommitted for you to commit with the work. The index is a self-ignoring cache 
 
 ## Status
 
-**Slices S1 (read) and S2 (write) built.** S3 (proxy catalogue, registry resolution,
+**Spine: slices S1 (read) and S2 (write) built. Spine Design: slice D1 built.** S3 (proxy catalogue, registry resolution,
 protocol ADR) is next.
 
 Measured on MRPGRealms (2026-10-23): brief ~2.4k tokens vs ~10k for protocol
@@ -140,6 +140,35 @@ block on error. Other agents get the same behaviour from the snippet above.
   "env_vars": ["SPINE_REGISTRY", "SPINE_READONLY"]
 }
 ```
+
+## Spine Design (second server, slice D1)
+
+Visual memory and inventory for a project's running UI. It stores captures with history,
+measures design tokens and components from the live DOM, and diffs captures. Answers are
+text; pixels only come back when you ask for them. Spec: [docs/specs/design-mcp.md](docs/specs/design-mcp.md).
+
+Mount `uv run --project <spine-mcp> spine-design-mcp` the same way as Spine.
+
+| Tool | Purpose |
+|---|---|
+| `design_brief(project)` | Views and their freshness, colours by role with the app's CSS variable names, size scales, fonts, components. About 300 tokens, no image. |
+| `extraction_script()` | The JS to run in the page before screenshotting: masks inputs/canvas with overlays (the page's data is untouched), freezes animation, returns measurements. |
+| `record_capture(agent, extraction, project, route?, viewport?, theme?, state?, image_path?, image_base64?)` | Store a capture. The screenshot is optional: measurements alone give tokens, components and style diffs. |
+| `get_capture(project, view?, which?, include_image?, crop?)` | Measurements and freshness. With `include_image`, a cropped, downscaled webp. |
+| `diff_captures(project, view?, a?, b?, threshold?)` | Changed regions (with the components under them), token use shifts, component style changes, UI source files changed. |
+| `tokens` / `components` / `forget` | Detail, inventory (with `spine-design.toml` mapping to `DESIGN.md` names), retention. |
+
+**Capturing, by browser:**
+
+| Agent's browser | How |
+|---|---|
+| Playwright MCP / chrome-devtools MCP (save files) | evaluate `extraction_script` with `filename=...json`, take a screenshot with `filename=...png`, then `record_capture(extraction=<json path>, image_path=<png>)`. Send the script once and keep it on `window`: the Playwright MCP echoes code back. |
+| BrowserOS neo | evaluate the script (the result is saved to a local file when it's large), then `record_capture` with no image. Server-side BrowserOS pixels arrive in D2. |
+| Any other | measurements only, the same way |
+
+Captures live in `<project>/.agent/design/cache/`, which ignores itself, is kept per host, and expires after 30 days or 20 per view.
+`<project>/.agent/design/spine-design.toml` (optional, tracked) sets `pixels = false`, `ui_paths`,
+`mask`, `ttl_days` and `[components]` mappings.
 
 ## License
 

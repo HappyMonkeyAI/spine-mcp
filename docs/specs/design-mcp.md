@@ -14,15 +14,18 @@ The next session, or another agent on another host, starts blind again:
 - **Pixels are expensive and forgotten.** A 1024×768 screenshot costs about 1k tokens to look at
   (roughly width×height/750), and an agent typically takes several per task. Nothing records what it saw,
   so "did this change anything?" means taking a new screenshot and comparing it from memory.
-- **The design spec and the app drift apart silently.** Measured statically on ZeroGTerm
-  (2026-10-23):
+- **The design spec and the app drift apart silently.** On ZeroGTerm (2026-10-23):
   - `DESIGN.md` was last changed 2026-08-31, but the renderer's CSS kept changing up to 2026-10-15.
-  - `DESIGN.md` describes one dark palette (`#0A0C10`, `#7AA2F7`, ...). Each of its 9 colors appears
-    0–6 times in `src`.
-  - The CSS's most-used colors are `#253044`, `#dbe2ec`, `#2459a6` and `#ffffff`, through 25 `:root`
-    variables and a `:root[data-theme='light']` theme that `DESIGN.md` never mentions.
-  - Nothing checks any of this, and an agent reading `DESIGN.md` would style new UI against a spec
-    the app no longer follows.
+  - A *static* source count was misleading. It suggested `DESIGN.md`'s palette was barely used,
+    because each color appears once, as a CSS variable.
+  - *Measured live* (D1), the dark theme does follow the palette: `--surface-0` #0a0c10,
+    `--line-1` #202630, text #d8dee9 / #697386.
+  - The real drift only shows at runtime. Font sizes are 13px on 115 elements, plus 11/10/9px,
+    against a spec of 14px body / 20px display. Radius is 5px on 11 elements, off the 4/6/10px
+    scale. One border uses `#3b82f6`, which isn't in any variable.
+  - There's also a `:root[data-theme='light']` theme that `DESIGN.md` never mentions.
+  - Nothing checks any of this. This is the case for measuring the running UI rather than
+    reading source.
 - **Design knowledge lives in prose.** An agent reads all of `DESIGN.md` to learn one colour,
   and learns nothing about the components the app really has.
 
@@ -221,7 +224,40 @@ in that theme is reported as unspecified. That is how ZeroGTerm's undocumented l
 
 ## 9. Slices and acceptance
 
-**D1 — store and measure agent-supplied captures (no browser in the server).**
+### Learned building D1 (2026-10-23), and what changed
+
+- **Screenshots are optional.** BrowserOS neo's SDK `page.screenshot` returns only
+  `{bytes, format, page}` (no data or path) and takes about 16 s. An agent working through BrowserOS
+  can't hand over an image file. Measurement-only captures carry most of the value (tokens,
+  components, style diffs) and work with any browser, so `record_capture` takes the image as
+  optional.
+- **BrowserOS pixels come through the server.** Raw CDP `Page.captureScreenshot` through
+  BrowserOS's `run` returns a ~10 KB webp in about 250 ms. The server should call BrowserOS's MCP
+  itself, so bytes never pass through an agent's context.
+  - Quirk: large `evaluate` results inside `run` come back empty (the ~18–33 KB extraction), so the
+    adapter must fetch results in chunks.
+  - **The BrowserOS adapter moves to D2**, because it's the user's preferred browser. Playwright
+    self-capture moves to D3.
+- **Agent-supplied pixels work with file-saving browsers.** The Playwright MCP (`browser_evaluate`
+  with `filename`, `browser_take_screenshot` with `filename`) and chrome-devtools both save files.
+  - The Playwright MCP echoes the whole function back, so agents should send `extract.js` once and
+    keep it on `window`.
+  - Its sandbox has no `import`/`fs`, so it can't load the script from disk itself.
+  - Pages with a CSP (ZeroGTerm's blocks `eval`) still work, because evaluation goes through CDP.
+- **Storage is lossless webp.** UI screenshots are flat color, so lossless came out *smaller* than
+  lossy (14 KB vs 16 KB at 1280×800). It also removes compression noise from diffs, which allows
+  a 2% default threshold. The original 10% missed a real dark-theme change: #0d1015 → #151a22 is
+  only 8/255.
+- **No tracked `inventory.json` in D1.** Writing a tracked file on every capture would dirty every
+  host's tree and conflict across hosts, the trap Spine avoided. The inventory is computed from
+  the local cache; a tracked summary arrives with approved baselines in D3.
+- **Live check on ZeroGTerm.** Changing one rule (`.rail-button`: radius 5→4px, background →
+  `--surface-3`) produced:
+  - pixels: 0.66% in the 2 rail-button regions
+  - tokens: `#151a22` 6→13, 4px 21→29, 5px 11→3, the 8 buttons exactly
+  - components: `button.rail-button` background and radius, nothing else
+
+**D1 — store and measure agent-supplied captures (no browser in the server). Built 2026-10-23.**
 `record_capture`, `get_capture`, `diff_captures`, `tokens`, `components`, `design_brief`, `forget`,
 `extract.js` resource, storage and retention.
 Acceptance, on ZeroGTerm, captured through BrowserOS neo by an agent:
@@ -232,8 +268,8 @@ Acceptance, on ZeroGTerm, captured through BrowserOS neo by an agent:
 - `design_brief` ≤ 1.2k tokens. Answering "what color is the active session item?" costs no image.
 - Seeded secrets in an input field never appear in a stored image or JSON (V2).
 
-**D2 — self-capture and spec comparison.** Playwright adapter (incl. Electron), `ensure_capture`
-freshness, `check_design`.
+**D2 — BrowserOS adapter and spec comparison.** The server captures through BrowserOS neo's MCP
+(CDP screenshot, chunked extraction), plus `ensure_capture` freshness and `check_design`.
 Acceptance:
 - Second `ensure_capture` with no UI change takes no screenshot.
 - Editing one `.css` file makes the view stale with that file as the reason.
@@ -241,7 +277,8 @@ Acceptance:
   divergence from `DESIGN.md`, and the light theme as unspecified. Measured component styles are
   cross-checked by hand on 5 components.
 
-**D3 — baselines and live sessions.** `approve_baseline`, BrowserOS adapter, state recipes.
+**D3 — baselines and headless capture.** `approve_baseline` + tracked inventory, Playwright
+adapter (incl. Electron `_electron.launch`) for CI and Linux hosts, state recipes.
 
 **D4 — integration.**
 - Spine's brief gets a 3-line design section (views stale, drift count).
