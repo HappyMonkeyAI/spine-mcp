@@ -15,7 +15,9 @@ from spine_core.resolve import SpinePathError, resolve_project, safe_path, to_po
 
 OVERSIZED_TOKENS = 8000
 CLOSED_STATUSES = {"complete", "completed", "done", "merged", "accepted", "cancelled", "abandoned"}
-RULE_HEADINGS = ("non-negotiable", "what not to do", "do not", "guardrail", "override", "safety", "worktree")
+# Substrings: "rule" covers Architectural/Operating/Non-negotiable rules; "boundar" covers boundaries.
+RULE_HEADINGS = ("non-negotiable", "what not to do", "do not", "guardrail", "override", "safety", "worktree",
+                 "rule", "workflow", "boundar", "invariant")
 # Where hard rules live: the project context plus every agent's instruction file.
 RULE_FILES = ("CONTEXT.md", "AGENTS.md", "CLAUDE.md", "HERMES.md", "GEMINI.md", "GROK.md")
 
@@ -62,11 +64,12 @@ def tasks(project: str | None = None, status: str | None = None) -> dict[str, An
             board.append(entry)
 
     checklist: dict[str, list[dict[str, Any]]] = {}
-    tasks_md = root / "TASKS.md"
+    # Case-insensitive: `tasks.md` is as common as `TASKS.md`, and Linux hosts care.
+    tasks_md = next((p for p in sorted(root.glob("*.md")) if p.name.lower() == "tasks.md"), root / "TASKS.md")
     if tasks_md.is_file():
         _, parts = sections(tasks_md.read_text(encoding="utf-8", errors="replace"))
         for part in parts:
-            items = [{"done": done, "text": text, "source": f"TASKS.md:{part.line_start + offset}"}
+            items = [{"done": done, "text": text, "source": f"{tasks_md.name}:{part.line_start + offset}"}
                      for offset, done, text in checkboxes(part.text)]
             if items:
                 checklist[part.heading] = items
@@ -222,7 +225,8 @@ def session_brief(project: str | None = None, focus: str | None = None, budget_t
         merges = git.recent_merges(root)
         candidates: list[tuple[str, str]] = [
             ("git", _git_section(root)),
-            ("recently merged", _merges_section(merges)),
+            ("recent history", _history_section(root, merges)),
+            ("current state", _state_section(index)),
             ("last checkpoint", _checkpoint_section(index)),
             ("open tasks", _tasks_section(project or str(root), merges)),
             # What not to trust ranks above detail: it changes how everything else is read.
@@ -285,13 +289,34 @@ def _git_section(root: Path) -> str:
     return "\n".join(lines)
 
 
-def _merges_section(merges: list[dict[str, str]]) -> str:
-    """Git is the record of what shipped; journals and boards lag behind it."""
-    return "\n".join(
-        f"- {m['date']} " + (f"#{m['pr']} " if m["pr"] else "")
-        + f"`{m['branch']}` — {clip(m['title'], 110)} ({m['sha']})"
-        for m in merges[:5]
-    )
+def _history_section(root: Path, merges: list[dict[str, str]]) -> str:
+    """The branch's own first-parent history: merges as PR + title, direct commits
+    as their subject. Git is the record of what shipped; journals and boards lag
+    behind it. (Merges alone mislead on repos that commit straight to main.)"""
+    out = git.run_git(root, "log", "--first-parent", "-7", "--format=%h%x1f%cs%x1f%s")
+    by_sha = {m["sha"]: m for m in merges}
+    lines = []
+    for record in (out or "").splitlines():
+        sha, date, subject = (record.split("\x1f") + ["", ""])[:3]
+        merge = by_sha.get(sha)
+        if merge:
+            lines.append(f"- {date} merged " + (f"#{merge['pr']} " if merge["pr"] else "")
+                         + f"`{merge['branch']}` — {clip(merge['title'], 100)} ({sha})")
+        else:
+            lines.append(f"- {date} {clip(subject, 110)} ({sha})")
+    return "\n".join(lines)
+
+
+STATE_HEADINGS = ("current state", "current status", "status", "current plan", "current focus")
+
+
+def _state_section(index: SpineIndex) -> str:
+    """The project's own statement of where it is (CONTEXT.md first)."""
+    for path in ("CONTEXT.md", "README.md"):
+        for row in index.chunks(path=path):
+            if row["heading"].lower().startswith(STATE_HEADINGS):
+                return f"- ({path}:{row['line_start']}) {clip_sentence(_body(row['text']), 600)}"
+    return ""
 
 
 def _merged(merges: list[dict[str, str]], text: str) -> dict[str, str] | None:
@@ -372,6 +397,8 @@ def _tasks_section(project: str, merges: list[dict[str, str]]) -> str:
 
 
 def _journal_section(index: SpineIndex, merges: list[dict[str, str]]) -> str:
+    if not index.journal(1):
+        return _undated_progress(index)
     lines = []
     for row in index.journal(5):
         merge = _merged(merges, row["heading"])
@@ -389,6 +416,26 @@ def _subsections(heading: str, text: str) -> list[tuple[str, str]]:
         else:
             out[-1][1].append(line)
     return [(h, "\n".join(body)) for h, body in out]
+
+
+UPDATED_RE = re.compile(r"Updated:?\s*(\d{4}-\d{2}-\d{2})")
+
+
+def _undated_progress(index: SpineIndex) -> str:
+    """A progress doc without dated entries: its outline, plus its "next" section."""
+    docs = [d["path"] for d in index.docs() if "/" not in d["path"] and "progress" in d["path"].lower()]
+    lines = []
+    for rel in sorted(docs, key=lambda p: (p != "PROGRESS.md", p))[:2]:
+        rows = index.chunks(path=rel)
+        found = UPDATED_RE.search(rows[0]["text"]) if rows else None
+        headings = [r["heading"] for r in rows[1:]]
+        lines.append(f"- `{rel}`" + (f" (updated {found.group(1)})" if found else "")
+                     + ": " + clip(" · ".join(headings), 220))
+        nxt = next((r for r in rows if "next" in r["heading"].lower()), None)
+        if nxt:
+            lines.append(f"  - **{nxt['heading']}** ({rel}:{nxt['line_start']}): "
+                         f"{clip_sentence(_body(nxt['text']), 300)}")
+    return "\n".join(lines)
 
 
 def _rules_section(index: SpineIndex) -> str:
@@ -452,6 +499,10 @@ def _adrs_section(index: SpineIndex) -> str:
         title = next((r["heading"] for r in rows if r["line_start"] <= 2), Path(rel).stem)
         status_row = next((r for r in rows if r["heading"].lower() == "status"), None)
         status = _body(status_row["text"]).strip().replace("*", "") if status_row else ""
+        if not status and rows:
+            # "- **Status:** Accepted" style, in the preamble.
+            found = re.search(r"Status:?\**:?\s*(.+)", rows[0]["text"])
+            status = found.group(1).replace("*", "").strip() if found else ""
         status_word = clip(re.split(r"[.—–(]", status, maxsplit=1)[0].strip(), 24) if status else "?"
         title = re.sub(r"^ADR[\s-]*", "", title).strip()
         lines.append(f"- {clip(title, 64)} [{status_word}]")
@@ -482,7 +533,8 @@ STALE_AFTER_MERGES = 3
 def _warnings_section(index: SpineIndex) -> str:
     lines = []
     # Planning docs that haven't moved while work merged: their "next" items may have shipped.
-    for rel in ("TASKS.md", ".agent-tasks.json"):
+    tasks_name = next((p.name for p in sorted(index.root.glob("*.md")) if p.name.lower() == "tasks.md"), "TASKS.md")
+    for rel in (tasks_name, ".agent-tasks.json"):
         last = git.last_commit(index.root, rel)
         if not last:
             continue

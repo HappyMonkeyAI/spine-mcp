@@ -231,3 +231,29 @@ def test_brief_has_verify_commands_adr_index_and_stale_plan_warning(project: Pat
     adrs = brief.split("## decisions (ADRs)", 1)[1]
     assert adrs.index("0003: Terrain v2 [Proposed]") < adrs.index("0002: Worktree coordination [Accepted]")
     assert "`TASKS.md` last changed" in brief and "3 merges ago" in brief
+
+
+def test_brief_generalises_to_differently_shaped_repos(project: Path) -> None:
+    # A repo shaped like xeno-gate-tactical: direct commits on main, lowercase tasks.md,
+    # undated PROGRESS.md, rules under other headings, "- **Status:**" ADRs, extra root docs.
+    from conftest import git
+    (project / "TASKS.md").unlink()
+    write(project, "tasks.md", "# tasks\n\n## Next\n\n- [ ] Wire the Intel wing\n")
+    write(project, "PROGRESS.md", "# Progress\n\nUpdated: 2026-10-01\n\n## Standing goal\n\nShip it.\n\n"
+                                  "## Next concrete step\n\nConnect the Gate Analysis wing.\n")
+    write(project, "CONTEXT.md", "# Context\n\n## Architectural rules\n\n- Keep geometry in `packages/geometry-kernel`.\n\n"
+                                 "## Current state\n\nPublic alpha. The editor works.\n")
+    write(project, "ROADMAP.md", "# Roadmap\n\n## Later\n\nMultiplayer lobbies.\n")
+    write(project, "docs/adr/0003-los.md", "# ADR 0003: Line of sight\n\n- **Status:** Accepted\n- **Date:** 2026-08-21\n\n## Decision\n\nWalls block.\n")
+    commit(project, "refactor: extract the turn flow")
+    brief = core.session_brief(str(project), budget_tokens=6000)["brief"]
+
+    history = brief.split("## recent history", 1)[1].split("\n## ", 1)[0]
+    assert "refactor: extract the turn flow" in history  # direct commits, not only merges
+    assert "## current state\n- (CONTEXT.md:" in brief and "Public alpha" in brief
+    assert "Wire the Intel wing (tasks.md:5)" in brief
+    assert "`PROGRESS.md` (updated 2026-10-01): Standing goal · Next concrete step" in brief
+    assert "Connect the Gate Analysis wing" in brief
+    assert "**Architectural rules**" in brief and "`packages/geometry-kernel`" in brief
+    assert "0003: Line of sight [Accepted]" in brief
+    assert core.recall(str(project), "multiplayer lobbies")["results"][0]["source"].startswith("ROADMAP.md")

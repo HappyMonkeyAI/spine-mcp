@@ -20,20 +20,12 @@ from .resolve import to_posix
 SCHEMA_VERSION = 1
 
 DEFAULT_SOURCES = [
-    "README.md",
-    "CONTEXT.md",
-    "AGENTS.md",
-    "MCP.md",
-    "TASKS.md",
-    "PROGRESS.md",
-    "MANIFEST.md",
-    "DESIGN.md",
-    # Per-agent instruction files: every agent's rules are searchable by every agent.
-    "CLAUDE.md",
-    "HERMES.md",
-    "GEMINI.md",
-    "GROK.md",
+    # Every root-level doc: projects name them freely (ARCHITECTURE, ROADMAP, tasks.md, ...).
+    # This includes each agent's instruction file (AGENTS, CLAUDE, HERMES, GEMINI, GROK),
+    # so every agent's rules are searchable by every agent.
+    "*.md",
     ".github/copilot-instructions.md",
+    "docs/*.md",
     "docs/adr/*.md",
     "docs/plans/*.md",
     ".agent/memories/**/*.md",
