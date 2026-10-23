@@ -191,13 +191,23 @@ Agents won't write to Spine reliably on their own, so there are two tiers:
 
 | Tier | Trigger | Writes | Needs agent? |
 |---|---|---|---|
-| **Mechanical (lazy)** | Next `session_brief` from *any* agent sees commits since the last checkpoint with no checkpoint covering them | `history/` file from `git log`/`diff --stat` for that range. No narrative. Works for every agent, with no hooks. | No |
-| **Mechanical (hook)** | `SessionEnd` hook → `spine checkpoint --mechanical` (Claude Code only, an optimisation) | Same, captured at session end so uncommitted work is noted too | No |
-| **Narrative** | Agent calls `checkpoint` | Full summary, next steps, decisions | Yes |
+| **Derived (floor)** | Every `session_brief`, from any agent | **Nothing.** The brief lists commits since the last checkpoint (and dirty paths) straight from git | No |
+| **Narrative** | Agent calls `checkpoint` | `history/` file: summary, done, next, blockers, decisions, verification | Yes |
 
-The nudge is a `Stop` hook running `spine nudge`. It blocks the stop **once** with
-"call spine.checkpoint" only when source files changed since the last
-checkpoint *and* there is no narrative checkpoint for this session. It's silent otherwise.
+*Built differently from the first draft:* the draft wrote "mechanical" checkpoint files
+(lazily on brief, or from a SessionEnd hook). That was dropped. A read would dirty the
+working tree, two hosts would write duplicate files for the same commit range, and the
+content can be derived from git whenever it's needed. Only agents' own words get written.
+
+The nudge is a Claude Code `Stop` hook running `spine nudge`. SessionStart (`brief --hook`)
+records the session's start SHA under the ignored `.agent/spine/sessions/`. Stop blocks
+**once** when the session changed the project (new commits, or dirty paths outside `.agent/`)
+and no checkpoint was written since it started. It's silent otherwise and never fails.
+Agents without hooks get the same from the AGENTS.md snippet ("before you stop, checkpoint").
+
+Distillation progress is an explicit, git-tracked marker (`.agent/memories/.distilled-through`)
+that `distill(done_through=...)` moves forward. An earlier version inferred progress from the
+newest memory's date, which let one fresh memory hide every older undistilled entry.
 
 Warm start is a `SessionStart` hook running `spine brief --project "$CLAUDE_PROJECT_DIR"`,
 which injects the brief as context. Non-Claude agents (Hermes, Codex) get the
@@ -244,15 +254,19 @@ Acceptance, on MRPGRealms:
 - `audit` flags `world-streaming.md` as stale if its paths changed since its anchor.
 - Path-escape attempts (`../`, absolute paths, symlinks out) are rejected (V2).
 
-**S2 — writes and nudges**
-`checkpoint`, `record_memory` (with dedupe), `distill`, mechanical
-SessionEnd checkpoint, Stop nudge.
+**S2 — writes and nudges (built 2026-10-23)**
+`checkpoint`, `record_memory` (with dedupe), `distill` (with marker), derived
+since-checkpoint view in the brief, Stop nudge, `SPINE_READONLY`.
 
-Acceptance:
+Acceptance (all covered by `tests/test_writes.py`):
 - Two worktrees checkpoint concurrently, then merge with no conflict.
 - `record_memory` on a near-duplicate title returns the existing file and doesn't create one.
-- Secret scrub catches seeded fake keys (V2).
-- Ending a session that edited files always leaves a `history/` file, mechanical or narrative.
+- Secret scrub catches seeded fake keys (V2), and keeps key names and ordinary text.
+- ~~Ending a session that edited files always leaves a `history/` file~~ Replaced by: the next
+  brief always shows unrecorded commits (derived, see §5), and the nudge fires once.
+- Live over MCP on a clone of MRPGRealms: dedupe gate, lesson append, marker, checkpoint,
+  agent-required refusal. This found and fixed a hang: git children inherited the MCP
+  stdin pipe (now `stdin=DEVNULL`).
 
 **S3 — integration**
 DynamicMCPProxy catalogue entry (`spine`), launcher-registry name resolution,
@@ -278,17 +292,18 @@ LAN transport · cross-project search.
 | Failure | Mitigation |
 |---|---|
 | Brief is confidently wrong after a big merge | SHA anchors and staleness on every item. Brief leads with git state. |
-| Agents ignore `checkpoint` | Mechanical tier guarantees a floor. Stop nudge, once per session. |
+| Agents ignore `checkpoint` | Derived since-checkpoint view guarantees a floor. Stop nudge, once per session. |
 | Memory sprawl / duplicates | `record_memory` dedupe gate. `audit` reports near-duplicates. |
 | Becomes a third task system | Tasks are read-only (§2 boundary). |
 | Brief grows until it's the new CONTEXT.md | Hard token budget, `omitted:` list, pointers instead of content. |
 | Index corrupt or out of date | Disposable cache. `spine reindex`, and hash check on every call. |
 | Windows/Linux path and CRLF issues (you run both) | Normalise to POSIX paths in the index. Hash content with line endings normalised. Test on both. |
 
-## 12. Open questions for you
+## 12. Open questions
 
-1. **Name:** `spine-mcp` (ties to the protocol's "Documentation Spine") or something else?
-2. **Commit `history/`?** Recommended yes: it travels across your machines and
-   worktrees. The alternative is gitignored, local-only history.
-3. **Stop-hook nudge:** on by default, or opt-in?
-4. **First pilot project:** MRPGRealms (follows the protocol, huge journal), or a smaller one?
+Settled by default while building: the name is `spine-mcp`, and MRPGRealms is the pilot.
+
+1. **Commit `history/`?** Spine never commits. Its files land as ordinary uncommitted
+   changes, so this is decided per project by whoever commits. Recommended: commit them
+   with the work, so they travel across your machines and worktrees.
+2. **Stop-hook nudge:** opt-in by installing the hook (README). It is never installed automatically.

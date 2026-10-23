@@ -1,4 +1,4 @@
-"""MCP server exposing read-only spine tools (slice S1)."""
+"""MCP server exposing spine tools: read (S1) and write (S2)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from mcp.server.fastmcp import FastMCP
 
 from spine_core.resolve import SpinePathError
 
-from . import core
+from . import core, writes
 
 INSTRUCTIONS = """\
 Spine gives warm-start context for a software project from its own docs
@@ -79,6 +79,63 @@ async def tasks(project: str | None = None, status: str | None = None) -> dict[s
 async def audit(project: str | None = None) -> dict[str, Any]:
     """Truth Audit: stale or broken memories, oversized docs, journal entries never distilled."""
     return core.audit(_project(project))
+
+
+@mcp.tool()
+async def checkpoint(
+    agent: str,
+    summary: str,
+    project: str | None = None,
+    done: list[str] | None = None,
+    next: list[str] | None = None,
+    blockers: list[str] | None = None,
+    decisions: list[str] | None = None,
+    paths: list[str] | None = None,
+    verification: dict[str, str] | None = None,
+    task_id: str | None = None,
+) -> dict[str, Any]:
+    """Record where this session got to (call before you stop). agent = who you are:
+    claude-code, codex, grok, hermes, ... verification maps V0-V4 to pass|fail|skip|waived.
+    Writes .agent/memories/history/<time>-<slug>.md (uncommitted; commit it with the work)."""
+    return writes.checkpoint(
+        _project(project), agent, summary, done=done, next=next, blockers=blockers,
+        decisions=decisions, paths=paths, verification=verification, task_id=task_id,
+    )
+
+
+@mcp.tool()
+async def record_memory(
+    agent: str,
+    kind: str,
+    title: str,
+    body: str,
+    project: str | None = None,
+    paths: list[str] | None = None,
+    tags: list[str] | None = None,
+    update_of: str | None = None,
+    force_new: bool = False,
+) -> dict[str, Any]:
+    """Save a durable fact a future agent needs and can't get from git or code:
+    kind = insight (how something works), decision (what was chosen and why), or lesson
+    (a gotcha or pattern). If a similar memory exists, nothing is written and candidates
+    are returned: retry with update_of=<candidate> to revise it, or force_new=true."""
+    return writes.record_memory(
+        _project(project), agent, kind, title, body, paths=paths, tags=tags,
+        update_of=update_of, force_new=force_new,
+    )
+
+
+@mcp.tool()
+async def distill(
+    project: str | None = None,
+    since: str | None = None,
+    limit: int = 15,
+    done_through: str | None = None,
+) -> dict[str, Any]:
+    """Journal entries and checkpoints not yet distilled into memories (oldest first),
+    plus existing memories with staleness, so you can propose record_memory calls.
+    When a batch is done, call with done_through=<YYYY-MM-DD of the last entry handled>."""
+    return writes.distill(_project(project), since=since, limit=limit, done_through=done_through)
 
 
 @mcp.resource("spine://brief")

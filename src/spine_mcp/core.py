@@ -162,13 +162,11 @@ def audit(project: str | None = None) -> dict[str, Any]:
         root = index.root
         tracked = git.tracked_files(root)
         memories = []
-        newest_memory_date = ""
         for doc in index.docs():
             if doc["kind"] not in MEMORY_KINDS or doc["kind"] == "checkpoint":
                 continue
             body = (root / doc["path"]).read_text(encoding="utf-8", errors="replace")
             state = staleness(root, doc["path"], json.loads(doc["meta"]), body, tracked)
-            newest_memory_date = max(newest_memory_date, state.anchor_date or "")
             memories.append({"path": doc["path"], "kind": doc["kind"], **state.as_dict()})
 
         oversized = [
@@ -177,7 +175,8 @@ def audit(project: str | None = None) -> dict[str, Any]:
             if doc_tokens(d) > OVERSIZED_TOKENS
         ]
         journal = [r for r in index.chunks(kind="journal") if r["date"]]
-        undistilled = [r for r in journal if r["date"] > newest_memory_date] if newest_memory_date else journal
+        cutoff = distilled_through(root)
+        undistilled = [r for r in journal if r["date"] > cutoff] if cutoff else journal
 
         return {
             "memories": len(memories),
@@ -185,12 +184,29 @@ def audit(project: str | None = None) -> dict[str, Any]:
             "unanchored": [m["path"] for m in memories if m["anchor"] is None],
             "oversized_docs": oversized,
             "journal_entries": len(journal),
-            "undistilled_since_last_memory": {
+            "undistilled": {
                 "count": len(undistilled),
-                "last_memory_date": newest_memory_date or None,
+                "distilled_through": cutoff or None,
                 "oldest": min((r["date"] for r in undistilled), default=None),
             },
         }
+
+
+DISTILLED_MARK = ".agent/memories/.distilled-through"
+
+
+def distilled_through(root: Path) -> str | None:
+    """The date the journal has been distilled up to, as recorded by distill(done_through=...).
+
+    An explicit, git-tracked marker: inferring it from the newest memory's date
+    would let one fresh memory hide every older undistilled entry.
+    """
+    mark = root / DISTILLED_MARK
+    try:
+        value = mark.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return value if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) else None
 
 
 # -- session brief -------------------------------------------------------
@@ -313,7 +329,16 @@ def _checkpoint_section(index: SpineIndex) -> str:
     lines = [f"- `{rel}` by {meta.get('agent', '?')} on `{meta.get('branch', '?')}` — {state.line()}"]
     for row in index.chunks(path=rel):
         if row["heading"].lower().startswith(("summary", "next", "blocker")):
-            lines.append(f"  - **{row['heading']}:** {clip(_body(row['text']), 300)}")
+            items = [line.strip().removeprefix("- ") for line in _body(row["text"]).split("\n") if line.strip()]
+            lines.append(f"  - **{row['heading']}:** {clip('; '.join(items), 300)}")
+    # What happened after it, straight from git: works for agents that never
+    # checkpoint, and writes nothing.
+    if meta.get("sha"):
+        since = git.run_git(index.root, "log", "--no-merges", "--format=%h %cs %s", f"{meta['sha']}..HEAD")
+        commits = since.splitlines() if since else []
+        if commits:
+            lines.append(f"  - **Since then:** {len(commits)} commits without a checkpoint")
+            lines += [f"    - {clip(c, 110)}" for c in commits[:5]]
     return "\n".join(lines)
 
 
