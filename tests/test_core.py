@@ -310,3 +310,8 @@ def test_adr_status_is_its_first_line_not_its_history(project: Path) -> None:
     brief = core.session_brief(str(project), budget_tokens=6000)["brief"]
     assert "0001: Terrain [Accepted — option 1, 2026-10-16]" in brief
     assert "unchanged for" not in brief
+
+
+@pytest.mark.parametrize("budget", [120, 300, 600, 1200])
+def test_brief_never_exceeds_its_budget(project: Path, budget: int) -> None:
+    assert core.session_brief(str(project), budget_tokens=budget)["tokens"] <= budget

@@ -274,14 +274,14 @@ def session_brief(project: str | None = None, focus: str | None = None, budget_t
     )
     # Breadth before detail: first place every section in its smallest form, in
     # priority order, then upgrade compact ones to full while the budget allows.
-    used = tokens(header)
+    used = tokens(header) + 20  # headroom for the "_for budget, ..._" note
     chosen: dict[str, str] = {}
     omitted: list[str] = []
     for name, body, compact in candidates:
         if not body:
             continue
         smallest = compact or body
-        cost = tokens(f"## {name}\n{smallest}")
+        cost = tokens(f"\n\n## {name}\n{smallest}")  # the blank-line separator counts too
         if used + cost > budget_tokens:
             omitted.append(name)
             continue
