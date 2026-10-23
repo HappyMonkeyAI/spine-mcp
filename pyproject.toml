@@ -1,0 +1,29 @@
+[project]
+name = "spine-mcp"
+version = "0.1.0"
+description = "Warm-start query layer over a project's Agents Protocol documentation spine"
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0.0,<2",  # 2.x renamed FastMCP to MCPServer; siblings are still on 1.x
+]
+
+[project.scripts]
+spine-mcp = "spine_mcp.server:main"
+spine = "spine_mcp.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spine_core", "src/spine_mcp"]
