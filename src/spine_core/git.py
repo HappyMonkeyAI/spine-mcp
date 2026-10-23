@@ -11,6 +11,9 @@ def run_git(root: Path, *args: str) -> str | None:
     try:
         result = subprocess.run(
             ["git", "-C", str(root), *args],
+            # Never inherit stdin: under MCP it is the JSON-RPC pipe, and a git
+            # child that waits on it (filters, fsmonitor, prompts) hangs the server.
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             encoding="utf-8",

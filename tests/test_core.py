@@ -191,3 +191,19 @@ def test_get_section_outline_grep_and_cap(project: Path) -> None:
     assert hit["text"] == "- Keep state in plain files"
     capped = core.get_section(str(project), "CONTEXT.md", "Non-negotiables", max_tokens=5)
     assert capped["truncated_from"] and "truncated" in capped["text"]
+
+
+def test_git_children_never_inherit_stdin(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Under MCP, stdin is the JSON-RPC pipe; a git child reading it hung the server.
+    import subprocess
+    from spine_core import git as spine_git
+    seen = {}
+    real_run = subprocess.run
+
+    def spy(*args, **kwargs):
+        seen["stdin"] = kwargs.get("stdin", "inherited")
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(spine_git.subprocess, "run", spy)
+    assert spine_git.head(project)
+    assert seen["stdin"] is subprocess.DEVNULL
