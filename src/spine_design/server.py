@@ -160,6 +160,16 @@ async def approve_baseline(agent: str, project: str | None = None, view: str | N
     return tools.approve_baseline(_project(project), agent, view, which, note)
 
 
+@mcp.tool()
+async def advisor_handoff(page_purpose: str, project: str | None = None, audience: str = "",
+                          desired_mood: str = "", view: str | None = None) -> dict[str, Any]:
+    """Arguments for the HTML Design Advisor MCP (recommend_design, get_design_guidance),
+    filled from the measured UI: palette with CSS variable names, fonts, type and radius
+    scales, themes, states, and WCAG contrast failures. Use before redesign work so advice
+    extends the system the app actually has. This tool does not call the Advisor."""
+    return tools.advisor_handoff(_project(project), page_purpose, audience, desired_mood, view)
+
+
 @mcp.resource("spine-design://extract.js")
 def extract_js() -> str:
     """The extraction script (same as the extraction_script tool)."""

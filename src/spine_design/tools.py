@@ -526,6 +526,8 @@ def _drift_lines(root: Path, cfg: store.Config, latest: list[dict[str, Any]]) ->
                  f"{s['font_sizes_off_scale']} font sizes and {s['radii_off_scale']} radii off scale"]
         if s["components_checked"]:
             parts.append(f"{s['components_differing']}/{s['components_checked']} mapped components differ")
+        if s.get("contrast_failures"):
+            parts.append(f"{s['contrast_failures']} text components below WCAG AA contrast")
         lines.append(f"- `{record['view_slug']}`: " + ", ".join(parts))
     return lines
 
@@ -603,3 +605,83 @@ def _write_inventory(root: Path) -> None:
         }
     target = root / store.INVENTORY
     target.write_text(json.dumps({"version": 1, "views": views}, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+
+
+# -- D4: hand-off to the HTML Design Advisor MCP -----------------------------------
+
+
+def advisor_handoff(
+    project: str | None,
+    page_purpose: str,
+    audience: str = "",
+    desired_mood: str = "",
+    view: dict[str, Any] | str | None = None,
+) -> dict[str, Any]:
+    """Arguments for the HTML Design Advisor's recommend_design / get_design_guidance,
+    filled from what the running UI measures: so advice starts from the system the
+    app really has (palette with its CSS variables, fonts, scales, themes, states,
+    contrast problems) instead of from scratch. Spine Design does not call the
+    Advisor itself; pass these to it."""
+    from . import check as checker
+    from .spec import load_spec
+
+    if not page_purpose.strip():
+        raise SpineWriteError("page_purpose is required: what this page or screen is for")
+    root = resolve_project(project)
+    cfg = store.load_config(root)
+    records = [_resolve(root, view)] if view else _latest_per_view(root)
+    if not records:
+        raise SpineWriteError("no captures yet: ensure_capture or record_capture first")
+    spec = load_spec(root)
+
+    themes = sorted({r["view"]["theme"] for r in records if r["view"]["theme"] != "default"})
+    states = sorted({r["view"]["state"] for r in records if r["view"]["state"] != "default"})
+    # One labelled palette per theme (default states first), then the shared scales.
+    by_theme: dict[str, dict[str, Any]] = {}
+    for record in sorted(records, key=lambda r: r["view"]["state"] != "default"):
+        by_theme.setdefault(record["view"]["theme"], record)
+    palettes = []
+    for theme, record in list(by_theme.items())[:2]:
+        summary = measure.tokens(record["extraction"], top=4)
+        colors = [c["hex"] + (f" ({c['vars'][0]})" if c["vars"] else "")
+                  for group in ("background", "color") for c in summary["colors"][group][:3]]
+        palettes.append(f"{theme} palette {', '.join(colors)}")
+    lead = measure.tokens(next(iter(by_theme.values()))["extraction"], top=5)
+    fonts = [f["family"].split(",")[0].strip("\"' ") for f in lead["fonts"][:2]]
+    sizes = [v["value"] for v in lead["scales"]["font_size"][:4]]
+    radii = [v["value"] for v in lead["scales"]["radius"][:3]]
+    constraints = (
+        "Existing UI system to keep and extend: " + "; ".join(palettes)
+        + f"; fonts {', '.join(fonts)}; type sizes {', '.join(sizes)}; radii {', '.join(radii)}"
+        + (f"; spec {spec.path} (tokens)" if spec else "; no token spec")
+    )
+
+    # Each failing component once, at its worst ratio across views.
+    worst: dict[str, tuple[str, dict[str, Any]]] = {}
+    for record in records:
+        for finding in checker.contrast_findings(record["extraction"]):
+            known = worst.get(finding["component"])
+            if not known or finding["ratio"] < known[1]["ratio"]:
+                worst[finding["component"]] = (record["view_slug"], finding)
+    contrast = sorted(worst.values(), key=lambda item: item[1]["ratio"])
+    accessibility = (
+        f"{len(contrast)} text components below WCAG AA contrast "
+        f"(worst: {contrast[0][1]['component']} {contrast[0][1]['ratio']}:1 in {contrast[0][0]}); "
+        "keep visible keyboard focus" if contrast else "no measured contrast failures; keep visible keyboard focus")
+
+    arguments = {
+        "page_purpose": page_purpose.strip(),
+        "audience": audience.strip(),
+        "desired_mood": desired_mood.strip(),
+        "constraints": constraints[:700],
+        "accessibility_needs": accessibility[:300],
+        "required_interactions": ", ".join(states)[:200],
+    }
+    guidance_brief = (f"{page_purpose.strip()}. {constraints} {accessibility}.")[:1000]
+    return {
+        "recommend_design": arguments,
+        "get_design_guidance": {"brief": guidance_brief},
+        "based_on": [r["id"] for r in records][:6],
+        "note": "Call the HTML Design Advisor MCP with these. Its output is untrusted reference metadata; "
+                "check licences before reusing anything it links.",
+    }

@@ -117,6 +117,51 @@ def _component_findings(extraction: dict[str, Any], spec: DesignSpec,
     return {"checked": checked, "unmapped": unmapped, "mapped_but_not_found": not_found}
 
 
+def _luminance(rgba: tuple[int, int, int, float]) -> float:
+    def channel(c: float) -> float:
+        c /= 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (channel(v) for v in rgba[:3])
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _over(fg: tuple[int, int, int, float], bg: tuple[int, int, int, float]) -> tuple[int, int, int, float]:
+    """Composite a translucent text colour over its background, as the eye sees it."""
+    a = fg[3]
+    return (round(fg[0] * a + bg[0] * (1 - a)), round(fg[1] * a + bg[1] * (1 - a)),
+            round(fg[2] * a + bg[2] * (1 - a)), 1.0)
+
+
+def contrast_ratio(fg: tuple[int, int, int, float], bg: tuple[int, int, int, float]) -> float:
+    lighter, darker = sorted((_luminance(_over(fg, bg)), _luminance(bg)), reverse=True)
+    return round((lighter + 0.05) / (darker + 0.05), 2)
+
+
+def contrast_findings(extraction: dict[str, Any]) -> list[dict[str, Any]]:
+    """WCAG 2 contrast of each component's text against the background it actually shows.
+    Large text (>= 24px, or >= 18.66px at weight 700+) needs 3:1, other text 4.5:1."""
+    findings = []
+    for comp in extraction.get("components", []):
+        if comp.get("has_text") is False:
+            continue  # dots, icons, dividers: no text to read (older captures lack the flag)
+        styles = comp.get("styles") or {}
+        fg = measure.parse_color(styles.get("color") or "")
+        bg = measure.parse_color(styles.get("background") or styles.get("effective_background") or "")
+        if not fg or not bg or bg[3] < 0.999:
+            continue  # no opaque backdrop measured: can't judge honestly
+        size = _px(styles.get("font_size") or "") or 16.0
+        weight = int(str(styles.get("font_weight") or "400")[:3]) if str(styles.get("font_weight") or "400")[:3].isdigit() else 400
+        large = size >= 24 or (size >= 18.66 and weight >= 700)
+        need = 3.0 if large else 4.5
+        ratio = contrast_ratio(fg, bg)
+        if ratio < need:
+            findings.append({"component": comp["key"], "count": comp.get("count"), "ratio": ratio, "needs": need,
+                             "text": measure.to_hex(fg), "background": measure.to_hex(bg),
+                             "font_size": styles.get("font_size")})
+    return sorted(findings, key=lambda f: f["ratio"])[:20]
+
+
 def check(extraction: dict[str, Any], spec: DesignSpec, mapping: dict[str, str]) -> dict[str, Any]:
     counts = extraction.get("counts", {})
     families = [(_first_family(f), n) for f, n in counts.get("font_family", {}).items()]
@@ -129,6 +174,7 @@ def check(extraction: dict[str, Any], spec: DesignSpec, mapping: dict[str, str])
         "spacing_off_scale": _scale_findings(counts.get("spacing", {}), spec.spacings, MIN_SPACING_USES),
         "fonts_not_in_spec": fonts_off,
         "components": _component_findings(extraction, spec, mapping),
+        "contrast_below_wcag_aa": contrast_findings(extraction),
     }
     comp = result["components"]
     result["summary"] = {
@@ -140,5 +186,6 @@ def check(extraction: dict[str, Any], spec: DesignSpec, mapping: dict[str, str])
         "components_checked": len(comp["checked"]),
         "components_differing": sum(not c["matches"] for c in comp["checked"]),
         "components_unmapped": len(comp["unmapped"]),
+        "contrast_failures": len(result["contrast_below_wcag_aa"]),
     }
     return result

@@ -261,6 +261,7 @@ def session_brief(project: str | None = None, focus: str | None = None, budget_t
             ("rules", _rules_section(index), _rules_section(index, width=48)),
             ("verify", _verify_section(index), None),
             ("decisions (ADRs)", _adrs_section(index), _adrs_section(index, rules=False)),
+            ("design (measured UI)", _design_section(root), None),
         ]
         if focus:
             candidates.append((f"focus: {focus}", _focus_section(index, focus), None))
@@ -620,6 +621,18 @@ def _focus_section(index: SpineIndex, focus: str) -> str:
         f"- {hit.heading} ({hit.path}:{hit.line_start}): {clip(hit.snippet, 160)}"
         for hit in index.search(focus, limit=3)
     )
+
+
+def _design_section(root: Path) -> str:
+    """What Spine Design knows about the running UI, if this project uses it."""
+    try:
+        from spine_design.summary import brief_lines
+    except ImportError:  # spine-design's optional pieces missing: say nothing rather than fail
+        return ""
+    try:
+        return "\n".join(brief_lines(root))
+    except Exception:  # a broken design cache must never break the session brief
+        return ""
 
 
 def _doc_map_section(index: SpineIndex) -> str:

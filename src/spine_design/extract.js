@@ -156,8 +156,11 @@
         const bg = getComputedStyle(up).backgroundColor;
         if (!transparent(bg)) shown = bg;
       }
+      // Whether the element directly holds text (a yes/no only; the text is never returned):
+      // contrast only matters for text, not for coloured dots and icons.
+      const hasText = Array.from(el.childNodes).some((n) => n.nodeType === 3 && n.textContent.trim());
       g = { key, selector, role, name: accessibleName(el), count: 0, bboxes: [],
-        styles: { ...s, effective_background: shown || null },
+        styles: { ...s, effective_background: shown || null }, has_text: hasText,
         classes: Array.from(el.classList).slice(0, 4) };
       groups.set(key, g);
     }

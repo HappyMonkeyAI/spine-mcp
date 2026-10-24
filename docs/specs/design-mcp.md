@@ -335,10 +335,32 @@ Learned:
   (styles are real; only preload APIs are missing). Launching the packaged app needs a build plus
   node-pty and is left until a view truly needs the preload (sessions, terminals).
 
-**D4 — integration.**
-- Spine's brief gets a 3-line design section (views stale, drift count).
-- The HTML Design Advisor can be handed a capture for review.
-- A DynamicMCPProxy catalogue entry.
+**D4 — integration. Built 2026-10-24.**
+- **Spine's brief** gets a `design (measured UI)` section: views captured and stale, approved
+  baselines, and per view the % on palette, off-scale sizes, mapped-component and contrast
+  counts.
+  - It works from tracked baselines on hosts with no cache.
+  - It's silent for projects without `.agent/design/`.
+  - A broken design cache can never break the session brief.
+- **WCAG contrast** joins `check_design`: each text component's colour against the background it
+  actually shows (inherited, translucency composited); 4.5:1, or 3:1 for large text.
+  - extract.js now records `has_text` (a yes/no only), so dots and icons aren't judged.
+  - On ZeroGTerm this removed false positives (`connection-dot`, `status-dot`). It left 8 real
+    failures, e.g. 9px `control-label` 2.68:1, `tab-meta` 3.66:1, the light theme's `/` separators 1.54:1.
+- **`advisor_handoff(page_purpose, ...)`** returns ready arguments for the HTML Design Advisor's
+  `recommend_design` and `get_design_guidance`, filled from measurements:
+  - one labelled palette per theme with CSS variable names
+  - fonts, type and radius scales, and the token spec
+  - states (as required interactions)
+  - contrast failures (deduplicated across views, at their worst ratio)
+
+  It doesn't call the Advisor: the agent passes them on, so the two servers stay independent.
+- **DynamicMCPProxy.** Both servers go in the proxy's gitignored `user.catalogue.json` overlay.
+  spine-mcp is private, so it stays out of the public catalogue. Tested live:
+  - the catalogue lists both
+  - a handshake for a UI-design task activated `spine-design` by itself
+  - both mounted, and `spine_session_brief` / `spine-design_design_brief` answered through the proxy
+    (1.2 s / 0.2 s)
 
 **Eval (as for Spine).** An independent agent writes 8 UI questions on ZeroGTerm:
 - current look: "primary background?", "active item style?"

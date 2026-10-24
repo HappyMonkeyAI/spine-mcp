@@ -12,7 +12,7 @@ uncommitted for you to commit with the work. The index is a self-ignoring cache 
 
 ## Status
 
-**Spine: slices S1 (read) and S2 (write) built. Spine Design: slices D1–D3 built.** S3 (proxy catalogue, registry resolution,
+**Spine: slices S1 (read) and S2 (write) built. Spine Design: slices D1–D4 built.** S3 (proxy catalogue, registry resolution,
 protocol ADR) is next.
 
 Measured on MRPGRealms (2026-10-23): brief ~2.4k tokens vs ~10k for protocol
@@ -129,6 +129,10 @@ block on error. Other agents get the same behaviour from the snippet above.
 
 ## Dynamic MCP Proxy Entry
 
+spine-mcp is private, so put these in the proxy's gitignored `user.catalogue.json`, not its public
+`catalogue.json`. A handshake for UI work then activates `spine-design` by itself, and tools
+appear as `spine_*` / `spine-design_*`.
+
 ```json
 {
   "name": "spine",
@@ -141,7 +145,19 @@ block on error. Other agents get the same behaviour from the snippet above.
 }
 ```
 
-## Spine Design (second server, slices D1–D3)
+```json
+{
+  "name": "spine-design",
+  "description": "Visual memory and inventory for a project's running UI: design brief, captures and diffs, tokens, components, DESIGN.md drift and contrast, baselines, HTML Design Advisor hand-off",
+  "command": "uv --project /home/stephen/projects/spine-mcp run spine-design-mcp",
+  "tags": ["design", "ui", "css", "tokens", "screenshots", "visual", "frontend", "accessibility", "local"],
+  "tech_stack": ["react", "vue", "svelte", "html", "css", "typescript", "javascript", "electron"],
+  "runtime": "stdio",
+  "env_vars": ["SPINE_BROWSEROS_URL", "SPINE_DESIGN_ADAPTER", "SPINE_PLAYWRIGHT_CHANNEL"]
+}
+```
+
+## Spine Design (second server, slices D1–D4)
 
 Visual memory and inventory for a project's running UI. It stores captures with history,
 measures design tokens and components from the live DOM, and diffs captures. Answers are
@@ -159,7 +175,12 @@ Mount `uv run --project <spine-mcp> spine-design-mcp` the same way as Spine.
 | `get_capture(project, view?, which?, include_image?, crop?)` | Measurements and freshness. With `include_image`, a cropped, downscaled webp. |
 | `diff_captures(project, view?, a?, b?, threshold?)` | Changed regions (with the components under them), token use shifts, component style changes, UI source files changed. |
 | `approve_baseline(agent, project, view?, which?, note?)` | Approve a capture as the view's reference: `.agent/design/baselines/` plus `inventory.json`, tracked and size-capped. Diffs compare against it by default. |
+| `advisor_handoff(page_purpose, project, audience?, desired_mood?, view?)` | Ready arguments for the HTML Design Advisor MCP's `recommend_design` / `get_design_guidance`, filled from measurements: per-theme palettes with CSS variables, fonts, scales, states, contrast failures. |
 | `tokens` / `components` / `forget` | Detail, inventory (with `spine-design.toml` mapping to `DESIGN.md` names), retention. |
+
+`check_design` also reports **WCAG AA contrast** for text components, using the background each
+one actually shows. Spine's own `session_brief` gains a short **design (measured UI)** section
+for projects that use Spine Design, so agents learn it exists without loading this server.
 
 **Capturing, by browser:**
 
