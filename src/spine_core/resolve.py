@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 from .git import run_git
@@ -33,8 +34,18 @@ def resolve_project(project: str | None = None) -> Path:
     return Path(toplevel).resolve() if toplevel else candidate
 
 
+def _key(value: object) -> str:
+    """Compare names loosely: "MRPGRealms", "mrpg-realms" and "MRPG Realms" are one project."""
+    return re.sub(r"[^a-z0-9]", "", str(value).lower())
+
+
 def _lookup_registry(name: str) -> Path | None:
-    """Look a project name up in launcher-project-registry's registry.json, if configured."""
+    """Look a project name up in launcher-project-registry's registry.json, if configured.
+
+    The registry's shape (launcher ADR 0001, registry_ops.py) is
+    {"projects": [{"slug", "name", "path", "catalogue_name", ...}]}; a project is
+    found by any of those names, compared loosely.
+    """
     registry = os.environ.get("SPINE_REGISTRY")
     if not registry:
         return None
@@ -44,10 +55,12 @@ def _lookup_registry(name: str) -> Path | None:
         return None
     projects = data.get("projects", data) if isinstance(data, dict) else data
     entries = projects.values() if isinstance(projects, dict) else projects
+    wanted = _key(name)
     for entry in entries:
         if not isinstance(entry, dict):
             continue
-        if name.lower() in {str(entry.get(k, "")).lower() for k in ("name", "id", "slug")}:
+        names = {_key(entry.get(k, "")) for k in ("name", "id", "slug", "catalogue_name")} - {""}
+        if wanted in names:
             path = entry.get("path") or entry.get("location")
             if path and Path(path).expanduser().is_dir():
                 return Path(path).expanduser()

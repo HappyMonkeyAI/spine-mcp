@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -315,3 +316,21 @@ def test_adr_status_is_its_first_line_not_its_history(project: Path) -> None:
 @pytest.mark.parametrize("budget", [120, 300, 600, 1200])
 def test_brief_never_exceeds_its_budget(project: Path, budget: int) -> None:
     assert core.session_brief(str(project), budget_tokens=budget)["tokens"] <= budget
+
+
+def test_registry_lookup_matches_launcher_registry_shape(project: Path, tmp_path: Path,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    # Shape written by launcher-project-registry's registry_ops.upsert_project (schema v1.1).
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps({"projects": [
+        {"slug": "other", "name": "Other", "path": str(tmp_path / "missing")},
+        {"slug": "mrpg-realms", "name": "MRPG Realms", "path": str(project), "transport": "http",
+         "catalogue_name": "mrpg_realms", "has_context_md": True, "adr_count": 16},
+    ]}), encoding="utf-8")
+    monkeypatch.setenv("SPINE_REGISTRY", str(registry))
+    from spine_core.resolve import resolve_project
+    for spelling in ("MRPGRealms", "mrpg-realms", "MRPG Realms", "mrpg_realms"):
+        assert resolve_project(spelling) == project.resolve()
+    with pytest.raises(SpinePathError, match="not found"):
+        resolve_project("other")  # registered, but its path doesn't exist here
+    assert "Spine brief" in core.session_brief("MRPGRealms")["brief"]
