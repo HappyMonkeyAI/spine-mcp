@@ -56,6 +56,19 @@ uv run pytest -q
 uv run spine --project ../MRPGRealms brief
 ```
 
+On every host an agent works from, also put the commands on PATH, so the MCP mount, the hooks
+and the AGENTS.md fallback (`spine brief`) all work without knowing where the repo lives:
+
+```bash
+uv tool install --editable /path/to/spine-mcp   # spine, spine-mcp, spine-design, spine-design-mcp
+```
+
+**Check the wiring, not just the docs.** On MRPGRealms, nine PRs (#90 to #98) shipped after
+AGENTS.md said "Spine first", and none of them wrote a checkpoint. Spine was never mounted for that
+agent, the hooks were not installed, and `spine` was not on PATH, so every "if available" branch
+was skipped silently. After wiring a host, run `claude mcp get spine` (or that agent's equivalent),
+and confirm the next session's first output is the brief.
+
 ## CLI
 
 ```bash
@@ -81,7 +94,7 @@ server instance to one project, set `SPINE_PROJECT` in that client's server conf
 
 | Agent | Mount | Warm start |
 |---|---|---|
-| Claude Code | `claude mcp add spine -- uv run --project <spine-mcp> spine-mcp` | SessionStart hook (below) |
+| Claude Code | `claude mcp add spine --scope local -e SPINE_PROJECT=<repo> -- spine-mcp` (run in the repo) | SessionStart hook (below) |
 | Codex | `~/.codex/config.toml` (below) | Codex reads `AGENTS.md`: add the snippet below |
 | Hermes | DynamicMCPProxy catalogue entry `spine` (below) or native MCP config | Add the snippet to `HERMES.md` / `AGENTS.md` |
 | Grok, or any MCP-capable CLI | same stdio command | the snippet in whatever file it reads |
@@ -117,11 +130,11 @@ block on error. Other agents get the same behaviour from the snippet above.
   "hooks": {
     "SessionStart": [
       { "hooks": [ { "type": "command",
-        "command": "uv run --project ~/happymonkey/spine-mcp spine --project \"$CLAUDE_PROJECT_DIR\" brief --hook" } ] }
+        "command": "spine --project \"$CLAUDE_PROJECT_DIR\" brief --hook" } ] }
     ],
     "Stop": [
       { "hooks": [ { "type": "command",
-        "command": "uv run --project ~/happymonkey/spine-mcp spine --project \"$CLAUDE_PROJECT_DIR\" nudge" } ] }
+        "command": "spine --project \"$CLAUDE_PROJECT_DIR\" nudge" } ] }
     ]
   }
 }
