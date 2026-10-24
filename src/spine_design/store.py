@@ -51,6 +51,8 @@ class Config:
     states: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     adapter: str = "browseros"          # or "playwright" (headless; CI and Linux hosts)
     browser_channel: str = ""           # playwright: "chrome"/"msedge" uses an installed browser
+    electron_app: str = "."             # electron: the app directory, relative to the project
+    electron_executable: str = ""       # electron: default node_modules/electron/dist/electron(.exe)
 
 
 def load_config(root: Path) -> Config:
@@ -62,7 +64,8 @@ def load_config(root: Path) -> Config:
     for name in ("pixels", "ttl_days", "cache_days", "keep_per_view", "baseline_max_bytes", "baseline_max"):
         if name in data:
             setattr(cfg, name, type(getattr(cfg, name))(data[name]))
-    for name in ("base_url", "wait_for", "theme_attr", "adapter", "browser_channel"):
+    for name in ("base_url", "wait_for", "theme_attr", "adapter", "browser_channel", "electron_app",
+                 "electron_executable"):
         if isinstance(data.get(name), str):
             setattr(cfg, name, data[name])
     for name in ("ui_paths", "mask", "allowed_hosts"):

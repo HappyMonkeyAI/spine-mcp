@@ -188,6 +188,7 @@ for projects that use Spine Design, so agents learn it exists without loading th
 |---|---|
 | Playwright MCP / chrome-devtools MCP (save files) | evaluate `extraction_script` with `filename=...json`, take a screenshot with `filename=...png`, then `record_capture(extraction=<json path>, image_path=<png>)`. Send the script once and keep it on `window`: the Playwright MCP echoes code back. |
 | BrowserOS neo | Don't capture yourself: call `ensure_capture`. The server drives BrowserOS through its MCP (`SPINE_BROWSEROS_URL`, default `http://127.0.0.1:9010/mcp`). Pixels are best-effort, because BrowserOS throttles background tabs. |
+| Packaged Electron app (views needing the main process: sessions, terminals) | `adapter = "electron"` (or `SPINE_DESIGN_ADAPTER=electron`) with the Playwright extra. It launches the project's own `node_modules/electron` binary **in a throwaway profile** (`--user-data-dir`; your real app data is never touched), then kills the process tree and deletes the profile. Use a state recipe to open sessions. |
 | Headless (CI, Linux, no BrowserOS) | `uv sync --extra playwright`, then `adapter = "playwright"` (or `SPINE_DESIGN_ADAPTER=playwright`) with `browser_channel = "chrome"` / `"msedge"`, or `playwright install chromium`. Deterministic, pixels every time. |
 | Any other | measurements only, the same way |
 
@@ -200,7 +201,7 @@ wait_for = "#root *"                 # selector that means "rendered"
 theme_attr = "data-theme"            # set on <html> per view theme ("" = prefers-color-scheme only)
 mask = [".xterm"]                    # never captured (inputs, canvas, [data-spine-mask] always are)
 pixels = true                        # false = measurements only, no images stored
-adapter = "browseros"                # or "playwright" (headless)
+adapter = "browseros"                # or "playwright" (headless) or "electron" (packaged app)
 browser_channel = "chrome"           # playwright: use an installed browser
 # allowed_hosts = ["127.0.0.1", "localhost"]   # ensure_capture refuses anything else
 

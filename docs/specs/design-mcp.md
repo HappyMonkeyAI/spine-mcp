@@ -331,9 +331,26 @@ Learned:
 - **A capture's URL leaked page content.** `location.origin + pathname` for a `data:` URL is the
   whole document, form values included (caught by the live adapter test). extract.js now reports
   origin + path only for http(s), else just the scheme.
-- **Not done: Electron `_electron.launch`.** ZeroGTerm's renderer measures fine as a plain page
-  (styles are real; only preload APIs are missing). Launching the packaged app needs a build plus
-  node-pty and is left until a view truly needs the preload (sessions, terminals).
+- **Electron capture (built 2026-10-24, `adapter = "electron"`):** launches the project's own packaged
+  app for views that need its main process (live sessions, terminals).
+  - Python Playwright has no Electron driver (`_electron` is Node-only). The adapter starts the
+    app's own Electron binary with a local-only DevTools port and attaches over CDP. A background
+    thread drains stderr, so the endpoint deadline holds and a chatty app can't stall on a full pipe.
+  - **Isolation was proven before the real app ran.** On Windows, redirecting `APPDATA` does **not**
+    isolate anything: Electron asks the OS for the real folder, and a probe still got
+    `…\Roaming\zerogterm`. `--user-data-dir` does, and it applies at module load, where ZeroGTerm
+    opens its workspace, secrets and port-forward stores.
+  - At runtime the adapter refuses to measure unless Electron wrote into the throwaway profile. It
+    then kills the whole process tree (pty shells included) and deletes the profile.
+  - Hashes of all 334 files in the user's real ZeroGTerm profile were identical before and after
+    every launch, including one that ran a live local shell.
+  - Pixels are best-effort here too: a window shown with `show: false` produces no frames, so the
+    screenshot gives up after 10 s and the measurements are kept.
+  - ZeroGTerm's `local-terminal` state (Ctrl+Shift+T, then submit the session dialog) measured 205
+    elements against 168 without a session. Terminal contents stayed masked (6 regions). This
+    enabled mapping `session-item-active`: 5px radius / 9px padding vs the spec's 4px / 8px.
+  - It also exposed doc drift: `DESIGN.md` said Ctrl+Shift+N creates a terminal, but it's
+    "new workspace" now; the terminal is Ctrl+Shift+T.
 
 **D4 — integration. Built 2026-10-24.**
 - **Spine's brief** gets a `design (measured UI)` section: views captured and stale, approved

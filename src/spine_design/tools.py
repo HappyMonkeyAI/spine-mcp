@@ -16,7 +16,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from spine_core import git
-from spine_core.resolve import resolve_project
+from spine_core.resolve import resolve_project, safe_path
 from spine_core.scrub import scrub
 from spine_mcp.writes import SpineWriteError, _check_agent, _check_writable
 
@@ -430,13 +430,19 @@ def ensure_capture(
     agent = _check_agent(agent)
     root = resolve_project(project)
     cfg = store.load_config(root)
-    target = url or (cfg.base_url.rstrip("/") + "/" + route.lstrip("/") if cfg.base_url else "")
-    if not target:
-        raise SpineWriteError("no URL: set base_url in .agent/design/spine-design.toml, or pass url")
-    host = urlparse(target).hostname or ""
-    if host not in cfg.allowed_hosts:
-        raise SpineWriteError(f"{host!r} is not in allowed_hosts {cfg.allowed_hosts}; Spine Design only "
-                              "captures the project's own dev server unless the config allows more")
+    adapter = os.environ.get("SPINE_DESIGN_ADAPTER") or cfg.adapter
+    if adapter == "electron":
+        # Launches the project's own packaged app; there is no URL to visit or guard.
+        app_dir = safe_path(root, cfg.electron_app) if cfg.electron_app not in {"", "."} else root
+        target = f"electron:{app_dir.name}"
+    else:
+        target = url or (cfg.base_url.rstrip("/") + "/" + route.lstrip("/") if cfg.base_url else "")
+        if not target:
+            raise SpineWriteError("no URL: set base_url in .agent/design/spine-design.toml, or pass url")
+        host = urlparse(target).hostname or ""
+        if host not in cfg.allowed_hosts:
+            raise SpineWriteError(f"{host!r} is not in allowed_hosts {cfg.allowed_hosts}; Spine Design only "
+                                  "captures the project's own dev server unless the config allows more")
     if state != "default" and state not in cfg.states:
         raise SpineWriteError(f"unknown state {state!r}; declare it under [states.{state}] in spine-design.toml"
                               + (f" (known: {', '.join(sorted(cfg.states))})" if cfg.states else ""))
@@ -451,9 +457,14 @@ def ensure_capture(
         reason = "forced" if force else "no capture of this view yet"
 
     from . import browseros
-    adapter = os.environ.get("SPINE_DESIGN_ADAPTER") or cfg.adapter
     if capture_fn is None:
-        if adapter == "playwright":
+        if adapter == "electron":
+            from . import playwright_adapter
+
+            def capture_fn(url: str, **kwargs: Any) -> Any:
+                exe = safe_path(root, cfg.electron_executable) if cfg.electron_executable else None
+                return playwright_adapter.capture_electron(app_dir, executable=exe, **kwargs)
+        elif adapter == "playwright":
             from . import playwright_adapter
 
             def capture_fn(url: str, **kwargs: Any) -> Any:
@@ -461,7 +472,7 @@ def ensure_capture(
         elif adapter == "browseros":
             capture_fn = browseros.capture
         else:
-            raise SpineWriteError(f"unknown adapter {adapter!r}: use browseros or playwright")
+            raise SpineWriteError(f"unknown adapter {adapter!r}: use browseros, playwright or electron")
     explicit_theme = theme if theme and theme != "default" else None
     try:
         captured = capture_fn(
@@ -478,7 +489,7 @@ def ensure_capture(
                               image_base64=captured.png_base64, adapter=adapter)
     notes = recorded.pop("notes", [])
     if captured.skipped_pixels:
-        notes.append("screenshot skipped (BrowserOS rendered no frame for the background tab in time); "
+        notes.append("screenshot skipped (no frame rendered in time: a background tab or hidden window); "
                      "measurements kept; force=true retries")
     if not captured.ready:
         notes.append(f"wait_for {cfg.wait_for!r} never matched; the page may not have rendered")
