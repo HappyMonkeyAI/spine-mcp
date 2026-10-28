@@ -211,3 +211,29 @@ def test_cli_hook_round_trip(project: Path, monkeypatch: pytest.MonkeyPatch, cap
     monkeypatch.setattr("sys.stdin", io.StringIO("not json"))
     assert cli.main(["--project", str(project), "nudge"]) == 0
     assert capsys.readouterr().out == ""
+
+
+def test_cli_cursor_hook(project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    import io
+    import json
+    from spine_mcp import cli
+
+    # Normal brief with --cursor-hook
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session_id": "s10"})))
+    assert cli.main(["--project", str(project), "brief", "--cursor-hook"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert "additional_context" in out
+    assert "Spine brief" in out["additional_context"]
+
+    # Both --hook and --cursor-hook
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session_id": "s11"})))
+    assert cli.main(["--project", str(project), "brief", "--hook", "--cursor-hook"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert "additional_context" in out
+    assert "Spine brief" in out["additional_context"]
+
+    # Fail-open on non-existent project directory
+    monkeypatch.setattr("sys.stdin", io.StringIO("{}"))
+    assert cli.main(["--project", "/nonexistent/path/for/spine/test", "brief", "--cursor-hook"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {}

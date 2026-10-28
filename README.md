@@ -95,6 +95,7 @@ server instance to one project, set `SPINE_PROJECT` in that client's server conf
 | Agent | Mount | Warm start |
 |---|---|---|
 | Claude Code | `claude mcp add spine --scope local -e SPINE_PROJECT=<repo> -- spine-mcp` (run in the repo) | SessionStart hook (below) |
+| Cursor | `.cursor/mcp.json` | `sessionStart` hook in `.cursor/hooks.json` (below) |
 | Codex | `~/.codex/config.toml` (below) | Codex reads `AGENTS.md`: add the snippet below |
 | Hermes | DynamicMCPProxy catalogue entry `spine` (below) or native MCP config | Add the snippet to `HERMES.md` / `AGENTS.md` |
 | Grok, or any MCP-capable CLI | same stdio command | the snippet in whatever file it reads |
@@ -135,6 +136,25 @@ block on error. Other agents get the same behaviour from the snippet above.
     "Stop": [
       { "hooks": [ { "type": "command",
         "command": "spine --project \"$CLAUDE_PROJECT_DIR\" nudge" } ] }
+    ]
+  }
+}
+```
+
+## Cursor hooks
+
+Place in `.cursor/hooks.json` (or project-level `.cursor/hooks.json`). `--cursor-hook` emits
+JSON `{"additional_context": "..."}` natively and fails open (`{}`) on errors.
+Note: Cursor's Agents Window may require opening the editor Agent panel for `sessionStart` delivery.
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "spine --project . brief --cursor-hook"
+      }
     ]
   }
 }
