@@ -334,3 +334,15 @@ def test_registry_lookup_matches_launcher_registry_shape(project: Path, tmp_path
     with pytest.raises(SpinePathError, match="not found"):
         resolve_project("other")  # registered, but its path doesn't exist here
     assert "Spine brief" in core.session_brief("MRPGRealms")["brief"]
+
+
+def test_registry_lookup_supports_utf8_bom(project: Path, tmp_path: Path,
+                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = tmp_path / "registry_bom.json"
+    content = json.dumps({"projects": [
+        {"slug": "mrpg-realms", "name": "MRPG Realms", "path": str(project)}
+    ]})
+    registry.write_bytes(b"\xef\xbb\xbf" + content.encode("utf-8"))
+    monkeypatch.setenv("SPINE_REGISTRY", str(registry))
+    from spine_core.resolve import resolve_project
+    assert resolve_project("MRPGRealms") == project.resolve()

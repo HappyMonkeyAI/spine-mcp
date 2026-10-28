@@ -50,7 +50,7 @@ def _lookup_registry(name: str) -> Path | None:
     if not registry:
         return None
     try:
-        data = json.loads(Path(registry).expanduser().read_text(encoding="utf-8"))
+        data = json.loads(Path(registry).expanduser().read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return None
     projects = data.get("projects", data) if isinstance(data, dict) else data
