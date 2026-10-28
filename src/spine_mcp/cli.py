@@ -24,6 +24,8 @@ def main(argv: list[str] | None = None) -> int:
     brief.add_argument("--budget", type=int, default=2500)
     brief.add_argument("--hook", action="store_true",
                        help="hook mode: read the hook's JSON on stdin, record the session start, never fail")
+    brief.add_argument("--cursor-hook", action="store_true",
+                       help="Cursor hook mode: print JSON {\"additional_context\": \"...\"}, record session start, never fail")
 
     section = sub.add_parser("section", help="print one ## section of a file (no heading: outline)")
     section.add_argument("path")
@@ -73,11 +75,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "brief":
-            if args.hook:
+            if args.hook or args.cursor_hook:
                 event = _hook_input()
                 if event.get("session_id"):
                     writes.start_session(args.project, event["session_id"])
-            print(core.session_brief(args.project, focus=args.focus, budget_tokens=args.budget)["brief"])
+            brief_text = core.session_brief(args.project, focus=args.focus, budget_tokens=args.budget)["brief"]
+            if args.cursor_hook:
+                print(json.dumps({"additional_context": brief_text}, ensure_ascii=False))
+            else:
+                print(brief_text)
         elif args.command == "section":
             result = core.get_section(
                 args.project, args.path, args.heading, grep=args.grep, max_tokens=args.max_tokens
@@ -121,6 +127,9 @@ def main(argv: list[str] | None = None) -> int:
                 _json({"decision": "block", "reason": reason})
     except Exception as exc:
         # A hook must never block session start.
+        if getattr(args, "cursor_hook", False):
+            print("{}")
+            return 0
         if getattr(args, "hook", False):
             return 0
         if not isinstance(exc, (SpinePathError, writes.SpineWriteError, OSError)):
