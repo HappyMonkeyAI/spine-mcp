@@ -5,3 +5,26 @@ __pycache__/
 dist/
 *.egg-info/
 .agent/spine/
+.agent/design/cache/
+
+# Secrets and local env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Build / tool caches
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+coverage.xml
