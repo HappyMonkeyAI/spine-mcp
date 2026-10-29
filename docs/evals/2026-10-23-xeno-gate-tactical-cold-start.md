@@ -44,5 +44,7 @@ Tool feedback from Run B:
 
 
 ## Follow-up (2026-10-29)
-Addressed in PR #5 / Jules: ADR lines now include decision reason/limitation; verify/convention clipping improved. Doc-drift status vs plan and app-level operating notes remain open.
+Addressed in PR #5 / Jules: ADR lines now include decision reason/limitation; verify/convention clipping improved.
+
+Remaining gaps closed on `feat/brief-remaining-eval-gaps`: unsettled ADR status vs linked plan that claims complete; app-level verify steps from `apps/*/docs`; known-issues section from Known: / Known limits / inline findings.
 

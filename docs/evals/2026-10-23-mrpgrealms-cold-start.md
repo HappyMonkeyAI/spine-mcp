@@ -49,4 +49,6 @@ honest next measurement.
   find, even with search.
 
 ## Follow-up (2026-10-29)
-Addressed in PR #5 / Jules: ADR decision+reason/limitation in brief; shipped next-items flagged against merges/commits; conventions/gates (V0, numerics) preserved in clip_rule/verify. Known-bug why-unfixed narratives remain open.
+Addressed in PR #5 / Jules: ADR decision+reason/limitation in brief; shipped next-items flagged against merges/commits; conventions/gates (V0, numerics) preserved in clip_rule/verify.
+
+Remaining gap closed on `feat/brief-remaining-eval-gaps`: brief `known issues` section surfaces PROGRESS `Known:` / `Found, not caused here` / `Observed (not changed)` bullets (newest first) with the why-unfixed phrasing.
