@@ -14,7 +14,7 @@ uncommitted for you to commit with the work. The index is a self-ignoring cache 
 
 **Spine: slices S1–S3 built. Spine Design: slices D1–D4 built.** S3: DynamicMCPProxy
 `user.catalogue.json` entries, default launcher/`~/.spine` registry resolution, AgentsProtocol
-ADR-0005 + BOOTSTRAP. Opt-in `PROGRESS.md` render-from-history remains deferred.
+ADR-0005 + BOOTSTRAP, opt-in `PROGRESS.md` render from `history/` (`spine render-progress`).
 
 Measured on MRPGRealms (2026-10-23): brief ~2.4k tokens vs ~10k for protocol
 grounding (and a 55k-token `PROGRESS.md` no agent can read whole); cold build ~1.9 s.
@@ -40,6 +40,7 @@ Details: [xeno-gate-tactical](docs/evals/2026-10-23-xeno-gate-tactical-cold-star
 | `checkpoint(agent, summary, project, done?, next?, blockers?, decisions?, paths?, verification?, task_id?)` | Writes `.agent/memories/history/<time>-<slug>.md`, anchored to HEAD; leads the next brief |
 | `record_memory(agent, kind, title, body, project, paths?, tags?, update_of?, force_new?)` | insight / decision → own file; lesson → section of `patterns_and_lessons.md`. Refuses near-duplicates and returns them as `update_of` candidates |
 | `distill(project, since?, limit?, done_through?)` | Undistilled journal + checkpoints (oldest first) and current memories; `done_through` moves the git-tracked marker |
+| `render_progress(project, write=false, limit=50)` | Opt-in: build `PROGRESS.md` from `.agent/memories/history/` (dry-run unless `write` or `SPINE_RENDER_PROGRESS=1`) |
 
 `project` is a path, a launcher-registry name, or (CLI only) omitted for the working
 directory. Set `SPINE_REGISTRY` to pin a registry file; when unset, Spine tries
