@@ -33,4 +33,6 @@
 S1–S3 built (proxy `user.catalogue.json`, default `~/.spine` + launcher-registry resolution,
 AgentsProtocol ADR-0005 + BOOTSTRAP). Opt-in `PROGRESS.md` render from `history/` via
 `render_progress` / `spine render-progress` (`--write` or `SPINE_RENDER_PROGRESS=1`).
-Brief grader gaps (docs/evals/) in flight via Jules.
+Cold-start brief grader gaps closed (PRs #5–#6): ADR reason/limit, shipped-next flags,
+plan/ADR drift warnings, app-level verify, known-issues. Honest next measure: fresh-question
+cold-start eval on a held-out project (not the 2026-10-23 question sets).
