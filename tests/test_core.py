@@ -346,3 +346,17 @@ def test_registry_lookup_supports_utf8_bom(project: Path, tmp_path: Path,
     monkeypatch.setenv("SPINE_REGISTRY", str(registry))
     from spine_core.resolve import resolve_project
     assert resolve_project("MRPGRealms") == project.resolve()
+
+
+def test_registry_lookup_uses_default_spine_path_when_env_unset(
+    project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S3: default registry paths are consulted when SPINE_REGISTRY is unset."""
+    monkeypatch.delenv("SPINE_REGISTRY", raising=False)
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps({"projects": [
+        {"slug": "mrpg-realms", "name": "MRPG Realms", "path": str(project)}
+    ]}), encoding="utf-8")
+    import spine_core.resolve as resolve_mod
+    monkeypatch.setattr(resolve_mod, "_default_registry_paths", lambda: [registry])
+    assert resolve_mod.resolve_project("MRPGRealms") == project.resolve()

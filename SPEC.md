@@ -48,7 +48,7 @@ in about 1.5k tokens, and makes writing memory cheap enough that agents actually
 
 | Concern | Owner | Spine's role |
 |---|---|---|
-| Project paths / ports | launcher-project-registry | resolve project name → root (reads `registry.json` if `SPINE_REGISTRY` set) |
+| Project paths / ports | launcher-project-registry | resolve project name → root (`SPINE_REGISTRY`, else `~/.spine/registry.json`, else launcher checkout `registry.json`) |
 | Task board, assignments | agent-coordination-mcp, `.agent-tasks.json`, `TASKS.md` | read-only merged view in the brief |
 | Agent messaging | agent-communication-mcp | none |
 | User prefs/stack | user-context-mcp | none |
