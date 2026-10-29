@@ -360,3 +360,41 @@ def test_registry_lookup_uses_default_spine_path_when_env_unset(
     import spine_core.resolve as resolve_mod
     monkeypatch.setattr(resolve_mod, "_default_registry_paths", lambda: [registry])
     assert resolve_mod.resolve_project("MRPGRealms") == project.resolve()
+
+
+def test_adr_brief_includes_reason_and_limitation(project: Path) -> None:
+    write(project, "docs/adr/0010-los.md",
+          "# ADR 0010: Line of sight\n\n## Status\n\nAccepted\n\n"
+          "## Decision\n\nWalls block line of sight.\n\n"
+          "## Rationale\n\nTo prevent see-through walls.\n\n"
+          "## Limitations\n\nOnly straight wall segments are supported.\n")
+    commit(project, "adr 10")
+    brief = core.session_brief(str(project), budget_tokens=6000)["brief"]
+    assert "0010: Line of sight [Accepted]: Walls block line of sight." in brief
+    assert "(reason: To prevent see-through walls.)" in brief
+    assert "(limit: Only straight wall segments are supported.)" in brief
+
+
+def test_stale_shipped_next_items_flagged(project: Path) -> None:
+    (project / "TASKS.md").unlink(missing_ok=True)
+    write(project, "tasks.md", "# tasks\n\n## Next\n\n- [ ] citadel/keep\n- [ ] Unrelated feature\n")
+    write(project, "PROGRESS.md", "# Progress\n\nUpdated: 2026-10-23\n\n## Next concrete step\n\nWire the Intel wing\n")
+    commit(project, "setup tasks")
+    _merge_branch(project, "agent/citadel-keep", 88, "add citadel/keep")
+    write(project, "src/intel.ts", "x\n")
+    commit(project, "feat: Wire the Intel wing")
+    brief = core.session_brief(str(project), budget_tokens=6000)["brief"]
+    assert "citadel/keep (tasks.md:5) — merged #88" in brief
+    assert "Wire the Intel wing — shipped in" in brief
+    assert "Unrelated feature" in brief and "— merged" not in brief.split("Unrelated feature")[1].split("\n")[0]
+
+
+def test_rules_and_verify_preserve_conventions_gates_and_env_vars(project: Path) -> None:
+    rule = "All unit tests must pass with >= 95% coverage threshold and V0=1 environment variable set."
+    clipped = core.clip_rule(rule, 40)
+    assert "V0=1" in clipped or "95%" in clipped
+
+    write(project, "AGENTS.md", "# Agents\n\n## Verification\n\n- Run `V0=1 uv run pytest -q` for quick checks\n")
+    commit(project, "agents verify")
+    brief = core.session_brief(str(project), budget_tokens=6000)["brief"]
+    assert "V0=1 uv run pytest -q" in brief

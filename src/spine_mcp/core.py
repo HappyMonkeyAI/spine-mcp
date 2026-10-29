@@ -410,36 +410,102 @@ def _checkpoint_section(index: SpineIndex) -> str:
     return "\n".join(lines)
 
 
+def _recent_commits(root: Path) -> list[tuple[str, str]]:
+    log_out = git.run_git(root, "log", "--first-parent", "-30", "--format=%h%x1f%s")
+    out = []
+    if log_out:
+        for line in log_out.splitlines():
+            parts = line.split("\x1f")
+            if len(parts) >= 2:
+                out.append((parts[0], parts[1]))
+    return out
+
+
+def _item_shipped(
+    root: Path,
+    merges: list[dict[str, str]],
+    text: str,
+    commits: list[tuple[str, str]] | None = None,
+) -> dict[str, str] | None:
+    """Check if a task or next-item text matches a recent git merge or commit."""
+    if not text or len(text.strip()) < 2:
+        return None
+    raw = text.strip()
+    norm_text = re.sub(r"[^a-z0-9]", "", raw.lower())
+    if not norm_text or len(norm_text) < 3:
+        return None
+
+    # Check recent merges
+    for merge in merges:
+        branch = merge.get("branch", "")
+        norm_branch = re.sub(r"[^a-z0-9]", "", branch.lower())
+        title = merge.get("title", "")
+        norm_title = re.sub(r"[^a-z0-9]", "", title.lower())
+
+        if norm_branch and (norm_branch in norm_text or norm_text in norm_branch):
+            return merge
+        if norm_title and (norm_text in norm_title or (len(norm_title) >= 5 and norm_title in norm_text)):
+            return merge
+
+    # Check recent non-merge commits
+    if commits is None:
+        commits = _recent_commits(root)
+
+    for sha, subject in commits:
+        norm_subj = re.sub(r"[^a-z0-9]", "", subject.lower())
+        if norm_subj and (norm_text in norm_subj or (len(norm_subj) >= 5 and norm_subj in norm_text)):
+            return {"sha": sha, "pr": "", "branch": "", "title": subject}
+
+    return None
+
+
 def _tasks_section(project: str, merges: list[dict[str, str]]) -> str:
+    root = resolve_project(project)
     view = tasks(project)
     lines = []
     open_board = [t for t in view["board"] if str(t.get("status", "")).lower() not in CLOSED_STATUSES]
-    # A board entry whose branch already merged is stale, not open work.
-    stale = [(t, m) for t in open_board if t.get("branch") and (m := _merged(merges, str(t["branch"])))]
-    open_board = [t for t in open_board if all(t is not s for s, _ in stale)]
-    for task in open_board[:8]:
+    commits = _recent_commits(root)
+
+    stale_board = []
+    active_board = []
+    for task in open_board:
+        query = task.get("branch") or task.get("title") or task.get("id") or ""
+        shipped = _item_shipped(root, merges, str(query), commits)
+        if shipped:
+            stale_board.append((task, shipped))
+        else:
+            active_board.append(task)
+
+    for task in active_board[:8]:
         where = task.get("branch") or task.get("worktree") or ""
         lines.append(f"- [{task.get('status', '?')}] `{task.get('id', '?')}` {clip(str(task.get('title', '')), 90)}"
                      + (f" ({where})" if where else ""))
-    if len(open_board) > 8:
-        lines.append(f"- … {len(open_board) - 8} more on `.agent-tasks.json`")
-    if stale:
+    if len(active_board) > 8:
+        lines.append(f"- … {len(active_board) - 8} more on `.agent-tasks.json`")
+    if stale_board:
         lines.append("- board is stale: " + ", ".join(
-            f"`{t.get('id')}` says {t.get('status')} but merged #{m['pr'] or m['sha']}" for t, m in stale[:4]
+            f"`{t.get('id')}` says {t.get('status')} but merged #{m['pr'] or m['sha']}" if m.get("pr")
+            else f"`{t.get('id')}` says {t.get('status')} but shipped in {m['sha']}"
+            for t, m in stale_board[:4]
         ))
     shown = 0
     for heading, items in view["checklist"].items():
         for item in items:
             if item["done"] or shown >= 5:
                 continue
-            lines.append(f"- {clip_sentence(item['text'], 260)} ({item['source']})")
+            shipped = _item_shipped(root, merges, item["text"], commits)
+            if shipped:
+                mark = f"merged #{shipped['pr']}" if shipped.get("pr") else f"shipped in {shipped['sha']}"
+                lines.append(f"- {clip_sentence(item['text'], 220)} ({item['source']}) — {mark}")
+            else:
+                lines.append(f"- {clip_sentence(item['text'], 260)} ({item['source']})")
             shown += 1
     return "\n".join(lines)
 
 
 def _journal_section(index: SpineIndex, merges: list[dict[str, str]]) -> str:
     if not index.journal(1):
-        return _undated_progress(index)
+        return _undated_progress(index, merges)
     lines = []
     for row in index.journal(5):
         merge = _merged(merges, row["heading"])
@@ -462,8 +528,10 @@ def _subsections(heading: str, text: str) -> list[tuple[str, str]]:
 UPDATED_RE = re.compile(r"Updated:?\s*(\d{4}-\d{2}-\d{2})")
 
 
-def _undated_progress(index: SpineIndex) -> str:
+def _undated_progress(index: SpineIndex, merges: list[dict[str, str]] | None = None) -> str:
     """A progress doc without dated entries: its outline, plus its "next" section."""
+    merges = merges if merges is not None else git.recent_merges(index.root)
+    commits = _recent_commits(index.root)
     docs = [d["path"] for d in index.docs() if "/" not in d["path"] and "progress" in d["path"].lower()]
     lines = []
     for rel in sorted(docs, key=lambda p: (p != "PROGRESS.md", p))[:2]:
@@ -474,8 +542,20 @@ def _undated_progress(index: SpineIndex) -> str:
                      + ": " + clip(" · ".join(headings), 220))
         nxt = next((r for r in rows if "next" in r["heading"].lower()), None)
         if nxt:
-            lines.append(f"  - **{nxt['heading']}** ({rel}:{nxt['line_start']}): "
-                         f"{clip_sentence(_body(nxt['text']), 300)}")
+            nxt_lines = []
+            for line in _body(nxt["text"]).split("\n"):
+                line_clean = line.strip().removeprefix("- ").removeprefix("* ").strip()
+                if not line_clean:
+                    continue
+                shipped = _item_shipped(index.root, merges, line_clean, commits)
+                if shipped:
+                    mark = f"merged #{shipped['pr']}" if shipped.get("pr") else f"shipped in {shipped['sha']}"
+                    nxt_lines.append(f"{line_clean} — {mark}")
+                else:
+                    nxt_lines.append(line_clean)
+            if nxt_lines:
+                lines.append(f"  - **{nxt['heading']}** ({rel}:{nxt['line_start']}): "
+                             f"{clip_sentence('; '.join(nxt_lines), 300)}")
     return "\n".join(lines)
 
 
@@ -499,39 +579,61 @@ def _rules_section(index: SpineIndex, width: int | None = None) -> str:
 
 
 CODE_SPAN = re.compile(r"`[^`\n]{2,60}`")
+CONVENTION_SPAN = re.compile(
+    r"\b(?:[A-Za-z0-9_]{2,}=(?:[^\s]+)|V\d+|>=\s*\d+%?|>\s*\d+%?|\d+%\s*|\d+\s*(?:ms|s|px|k|MB|GB))\b"
+)
 
 
 def clip_rule(rule: str, width: int) -> str:
-    """Clip a rule, but keep the inline-code spans it names: exact conventions
-    (`.worktrees/<task-id>`, `NEW_WORLD_TERRAIN_VERSION`) are what clipping loses."""
+    """Clip a rule, but keep inline code spans, numeric gates and exact conventions it names."""
     clipped = clip(rule, width)
     if clipped == " ".join(rule.split()):
         return clipped
-    lost = [s for s in dict.fromkeys(CODE_SPAN.findall(rule)) if s not in clipped]
-    return clipped + (" [" + ", ".join(lost[:3]) + "]" if lost else "")
+    spans = dict.fromkeys(CODE_SPAN.findall(rule) + CONVENTION_SPAN.findall(rule))
+    lost = [s for s in spans if s not in clipped]
+    return clipped + (" [" + ", ".join(lost[:4]) + "]" if lost else "")
 
 
-VERIFY_HEADINGS = ("verification", "verify", "testing", "checks")
+VERIFY_HEADINGS = ("verification", "verify", "testing", "checks", "gate")
 
 
 def _verify_section(index: SpineIndex) -> str:
-    """How to verify: the project's own guidance and commands (verbatim from the first
-    verification section with a code block), plus each app's package.json scripts,
-    which are the ground truth for per-app checks in a monorepo."""
+    """How to verify: the project's own guidance and commands (verbatim from
+    verification sections with code blocks or command bullets), plus each app's
+    package.json scripts, which are the ground truth for per-app checks in a monorepo."""
     lines: list[str] = []
+    seen_sources: set[str] = set()
     for path in RULE_FILES + ("README.md",):
         for row in index.chunks(path=path):
             for heading, body in _subsections(row["heading"], row["text"]):
-                if lines or not heading.lower().startswith(VERIFY_HEADINGS):
+                h_lower = heading.lower()
+                if not any(k in h_lower for k in VERIFY_HEADINGS):
                     continue
+                source_key = f"{path}:{row['line_start']}"
+                if source_key in seen_sources:
+                    continue
+
+                commands = []
+                guidance = ""
                 block = re.search(r"```[^\n]*\n(.*?)```", body, re.S)
-                if not block:
-                    continue
-                guidance = body[: block.start()].strip()
-                lines.append(f"- from {path}:{row['line_start']} ({heading})"
-                             + (f": {clip_sentence(guidance, 160)}" if guidance else ""))
-                commands = [c.strip() for c in block.group(1).split("\n") if c.strip() and not c.strip().startswith("#")]
-                lines += [f"  - `{clip(c, 110)}`" for c in commands[:6]]
+                if block:
+                    guidance = body[: block.start()].strip()
+                    commands = [c.strip() for c in block.group(1).split("\n") if c.strip() and not c.strip().startswith("#")]
+                else:
+                    bullets_found = bullets(body)
+                    for b in bullets_found:
+                        code_matches = CODE_SPAN.findall(b)
+                        if code_matches:
+                            commands.extend(c.strip("`") for c in code_matches)
+                        elif any(cmd in b for cmd in ("pytest", "npm", "cargo", "go test", "make", "python", "uv run", "V0=")):
+                            commands.append(b)
+                    guidance = body.split("\n", 1)[0].strip()
+
+                if commands:
+                    seen_sources.add(source_key)
+                    lines.append(f"- from {path}:{row['line_start']} ({heading})"
+                                 + (f": {clip_sentence(guidance, 160)}" if guidance else ""))
+                    lines += [f"  - `{clip(c, 110)}`" for c in commands[:6]]
     for manifest in [index.root / "package.json", *sorted(index.root.glob("apps/*/package.json"))]:
         scripts = _check_scripts(manifest)
         if scripts:
@@ -588,6 +690,31 @@ def _short_status(status: str) -> str:
     return clip(re.split(r"\.\s", status, maxsplit=1)[0].rstrip("."), 48) if status else "?"
 
 
+def _adr_summary(rows: list[Any]) -> str:
+    decision = next((r for r in rows if r["heading"].lower().startswith("decision")), None)
+    rule = _first_rule(decision["text"]) if decision else ""
+    if not rule:
+        return ""
+
+    # Check for reason if not already in rule
+    has_reason = any(w in rule.lower() for w in ("because", "due to", "in order to", "so that", "reason"))
+    if not has_reason:
+        reason_row = next((r for r in rows if any(k in r["heading"].lower() for k in ("rationale", "reason", "context"))), None)
+        if reason_row:
+            r_text = _first_rule(reason_row["text"])
+            if r_text and r_text.lower() not in rule.lower():
+                rule += f" (reason: {clip(r_text, 60)})"
+
+    # Check for consequence / limitation
+    lim_row = next((r for r in rows if any(k in r["heading"].lower() for k in ("consequence", "limitation", "tradeoff", "drawback", "caveat", "known limit"))), None)
+    if lim_row:
+        l_text = _first_rule(lim_row["text"])
+        if l_text and l_text.lower() not in rule.lower():
+            rule += f" (limit: {clip(l_text, 60)})"
+
+    return rule
+
+
 def _adrs_section(index: SpineIndex, rules: bool = True) -> str:
     """ADRs newest first: title and status, plus the decision's first rule for the
     newest few (an agent can't respect a rule it only knows the title of).
@@ -600,10 +727,9 @@ def _adrs_section(index: SpineIndex, rules: bool = True) -> str:
         status_word = _short_status(_adr_status(rows))
         title = re.sub(r"^ADR[\s-]*", "", title).strip()
         line = f"- {clip(title, 64)} [{status_word}]"
-        decision = next((r for r in rows if r["heading"].lower().startswith("decision")), None)
-        rule = _first_rule(decision["text"]) if rules and decision and n < ADR_RULE_LINES else ""
+        rule = _adr_summary(rows) if rules and n < ADR_RULE_LINES else ""
         if rule:
-            line += f": {clip_sentence(rule, 120)}"
+            line += f": {clip_sentence(rule, 140)}"
         lines.append(line)
     if len(adrs) > 16:
         lines.append(f"- … {len(adrs) - 16} older in `docs/adr/`")

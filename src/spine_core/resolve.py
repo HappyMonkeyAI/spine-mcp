@@ -93,7 +93,7 @@ def _lookup_registry(name: str) -> Path | None:
 
 def safe_path(root: Path, relative: str) -> Path:
     """Resolve a project-relative path, refusing anything that lands outside root."""
-    if not relative or Path(relative).is_absolute() or relative.startswith(("/", "\\")):
+    if not relative or Path(relative).is_absolute() or relative.startswith(("/", "\\")) or re.match(r"^[a-zA-Z]:", relative):
         raise SpinePathError(f"path must be relative to the project root: {relative!r}")
     resolved = (root / relative).resolve()
     if not resolved.is_relative_to(root.resolve()):

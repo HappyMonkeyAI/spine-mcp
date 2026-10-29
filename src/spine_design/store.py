@@ -149,7 +149,7 @@ def captures(root: Path, view_slug: str | None = None) -> list[dict[str, Any]]:
                 out.append(json.loads(meta.read_text(encoding="utf-8")))
             except (OSError, ValueError):
                 continue
-    return sorted(out, key=lambda c: c.get("taken", ""), reverse=True)
+    return sorted(out, key=lambda c: (c.get("taken", ""), c.get("id", "")), reverse=True)
 
 
 def save(root: Path, record: dict[str, Any]) -> Path:
