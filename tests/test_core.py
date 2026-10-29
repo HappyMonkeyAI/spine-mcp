@@ -398,3 +398,59 @@ def test_rules_and_verify_preserve_conventions_gates_and_env_vars(project: Path)
     commit(project, "agents verify")
     brief = core.session_brief(str(project), budget_tokens=6000)["brief"]
     assert "V0=1 uv run pytest -q" in brief
+
+
+def test_adr_plan_completion_drift_warning(project: Path) -> None:
+    write(
+        project,
+        "docs/plans/2026-10-02-decomp.md",
+        "# Decomp\n\n**Status:** approved; P0 done; P1 done; P2 done; P8 done. "
+        "The decomposition is complete. **Date:** 2026-10-02.\n\n## Packets\n\n| # | Packet |\n",
+    )
+    write(
+        project,
+        "docs/adr/0008-composition.md",
+        "# ADR 0008: Composition root\n\n"
+        "- **Status:** Accepted (in progress: decomposition packets P2 onward)\n"
+        "- **Date:** 2026-10-02\n\n"
+        "## Decision\n\nState is plain data. See `docs/plans/2026-10-02-decomp.md`.\n",
+    )
+    commit(project, "adr + complete plan")
+    brief = core.session_brief(str(project), budget_tokens=6000)["brief"]
+    assert "`docs/adr/0008-composition.md` status" in brief
+    assert "docs/plans/2026-10-02-decomp.md` says the work is complete" in brief
+
+
+def test_brief_surfaces_app_verify_and_known_issues(project: Path) -> None:
+    write(
+        project,
+        "apps/xeno-tactical/docs/smoke-test.md",
+        "# Smoke\n\n## Run\n\n```bash\ncd apps/xeno-tactical\nnpm run build\nnpm run smoke\n```\n\n"
+        "## Known limits\n\n"
+        "- Right-click-to-turn only works when no path preview is showing; existing behaviour.\n"
+        "- Attack animation playback is not asserted.\n",
+    )
+    write(
+        project,
+        "apps/xeno-tactical/package.json",
+        '{"scripts": {"build": "tsc", "smoke": "node scripts/smoke.mjs", "dev": "vite"}}',
+    )
+    write(
+        project,
+        "PROGRESS.md",
+        "# Progress\n\nUpdated: 2026-10-23\n\n## Notes\n\n"
+        "- Known: `scripts/smoke-persistence.mjs` fails in its write phase; not touched here.\n"
+        "- Known: the default world file is launch-directory dependent; not changed here.\n"
+        "- Shipped something unrelated.\n"
+        "- Decomposition P2: extracted camera. Pre-existing, not changed: "
+        "`dispose()` never removes the resize listener; worth fixing when the input packet touches it. "
+        "Tests 24/24 pass. Next: P6.\n",
+    )
+    commit(project, "app smoke + known")
+    brief = core.session_brief(str(project), budget_tokens=6000)["brief"]
+    assert "- from `apps/xeno-tactical/docs/smoke-test.md` (Run)" in brief
+    assert "`npm run smoke`" in brief
+    assert "## known issues" in brief
+    assert "Right-click-to-turn only works when no path preview" in brief
+    assert "smoke-persistence.mjs` fails in its write phase; not touched here" in brief
+    assert "Pre-existing, not changed: `dispose()` never removes the resize listener" in brief

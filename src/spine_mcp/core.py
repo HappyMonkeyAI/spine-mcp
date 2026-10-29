@@ -257,6 +257,7 @@ def session_brief(project: str | None = None, focus: str | None = None, budget_t
             ("open tasks", _tasks_section(project or str(root), merges), None),
             # What not to trust ranks above detail: it changes how everything else is read.
             ("warnings", _warnings_section(index), None),
+            ("known issues", _known_issues_section(index), None),
             ("recent journal", _journal_section(index, merges), None),
             ("rules", _rules_section(index), _rules_section(index, width=48)),
             ("verify", _verify_section(index), None),
@@ -639,7 +640,45 @@ def _verify_section(index: SpineIndex) -> str:
         if scripts:
             where = to_posix(index.root, manifest.parent) if manifest.parent != index.root else "root"
             lines.append(f"- `{where}` package scripts: {', '.join(scripts)}")
+    # App-level how-to / smoke docs (monorepo operating notes the root verify section misses).
+    app_docs: list[Path] = []
+    for pattern in ("apps/*/README.md", "apps/*/AGENTS.md", "apps/*/docs/*.md"):
+        app_docs.extend(sorted(index.root.glob(pattern)))
+    seen_app: set[str] = set()
+    for path in app_docs:
+        rel = to_posix(index.root, path)
+        if rel in seen_app:
+            continue
+        seen_app.add(rel)
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        _, secs = sections(text)
+        for sec in secs:
+            if not _is_app_verify_heading(sec.heading):
+                continue
+            block = re.search(r"```[^\n]*\n(.*?)```", sec.text, re.S)
+            cmds = []
+            if block:
+                cmds = [c.strip() for c in block.group(1).split("\n")
+                        if c.strip() and not c.strip().startswith("#")]
+            if not cmds:
+                continue
+            lines.append(f"- from `{rel}` ({sec.heading})")
+            lines += [f"  - `{clip(c, 110)}`" for c in cmds[:4]]
+            break  # one verify-ish section per app doc is enough
     return "\n".join(lines)
+
+
+def _is_app_verify_heading(heading: str) -> bool:
+    """True for verify/run sections in app docs; avoid broad matches like 'Runtime'."""
+    h = heading.lower().strip()
+    if any(k in h for k in VERIFY_HEADINGS):
+        return True
+    if h == "run" or h.startswith("run ") or "how to run" in h or "how to" in h:
+        return True
+    return "smoke" in h and "limit" not in h
 
 
 CHECK_SCRIPT = re.compile(r"(?i)^(type-?check|lint|test|tests|build|smoke|e2e|check|verify)([:-].*)?$")
@@ -740,6 +779,123 @@ def _adrs_section(index: SpineIndex, rules: bool = True) -> str:
 
 UNSETTLED = re.compile(r"(?i)\b(in progress|proposed|pending|draft|awaiting|wip)\b")
 DRIFT_AFTER_COMMITS = 5
+PLAN_LINK = re.compile(r"`?(docs/plans/[\w./-]+\.md)`?")
+PLAN_COMPLETE = re.compile(
+    r"(?i)\b(?:(?:the )?decomposition is complete|(?:the )?plan is complete|"
+    r"all packets? (?:are )?done|work is complete)\b"
+)
+PACKET_DONE = re.compile(r"\bP\d+\s+done\b", re.I)
+# Explicit known-bug / deferred bullets (MRPG style) and inline findings (xeno style).
+KNOWN_BULLET = re.compile(
+    r"(?i)^(?:Known|Observed \(not changed\)|Pre-existing,? not changed|Found, not caused here)\s*:\s*(.+)$"
+)
+INLINE_FINDING = re.compile(
+    r"(?i)(?:Finding \(existing behaviour[^)]*\)|Pre-existing,? not changed)\s*:\s*(.+?)(?:\.\s(?:Tests|Next)|$)"
+)
+
+
+def _is_known_heading(heading: str) -> bool:
+    """Headings that collect known bugs / limits — not journal titles that merely say 'limit'."""
+    h = heading.lower().strip()
+    if h.startswith("known") or h.startswith("awaiting confirmation"):
+        return True
+    if h in ("limitations", "limits", "caveats", "deferred", "known limits", "known issues"):
+        return True
+    return any(k in h for k in ("known limit", "known bug", "known issue", "known behaviour",
+                                "known behavior", "known environment", "awaiting confirmation"))
+
+
+def _adr_plan_completion_drift(index: SpineIndex, rel: str, status: str) -> str | None:
+    """Unsettled ADR whose linked plan claims the work is already complete."""
+    body = "\n".join(row["text"] for row in index.chunks(path=rel))
+    plans = list(dict.fromkeys(PLAN_LINK.findall(body)))
+    for plan_rel in plans:
+        path = index.root / plan_rel
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")[:4000]
+        except OSError:
+            continue
+        opening = text[:900]
+        done = bool(PLAN_COMPLETE.search(text))
+        if not done and len(PACKET_DONE.findall(opening)) >= 3 and re.search(r"(?i)\bcomplete\b", opening):
+            done = True
+        if done:
+            return (f"- `{rel}` status \"{clip(status, 60)}\" but `{plan_rel}` "
+                    "says the work is complete: update the ADR status")
+    return None
+
+
+def _known_issues_section(index: SpineIndex) -> str:
+    """Known bugs / limits with why-unfixed, from PROGRESS and app docs."""
+    lines: list[str] = []
+    seen: set[str] = set()
+
+    def add(source: str, text: str) -> None:
+        text = " ".join(text.split()).strip().removeprefix("- ").removeprefix("* ")
+        if not text:
+            return
+        key = clip(text, 72).lower()
+        if key in seen:
+            return
+        seen.add(key)
+        lines.append(f"- ({source}) {clip_sentence(text, 180)}")
+
+    # Prefer explicit Known: / Found-not-caused bullets (newest first so recent wins the cap).
+    progress = index.root / "PROGRESS.md"
+    progress_text = ""
+    if progress.is_file():
+        try:
+            progress_text = progress.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            progress_text = ""
+        progress_lines = progress_text.split("\n")
+        for i, raw in reversed(list(enumerate(progress_lines, start=1))):
+            line = raw.strip()
+            if not line.startswith(("-", "*")):
+                continue
+            body = line[1:].strip()
+            if KNOWN_BULLET.match(body):
+                add(f"PROGRESS.md:{i}", body)
+
+    # Dedicated "Known …" sections in PROGRESS and app operating docs.
+    scan_paths: list[Path] = []
+    for name in ("PROGRESS.md", "FEATURE-PROGRESS.md"):
+        p = index.root / name
+        if p.is_file():
+            scan_paths.append(p)
+    scan_paths.extend(sorted(index.root.glob("apps/*/docs/*.md")))
+    for path in scan_paths:
+        rel = to_posix(index.root, path)
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        _, secs = sections(text)
+        for sec in secs:
+            if not _is_known_heading(sec.heading):
+                continue
+            for b in bullets(sec.text)[:8]:
+                add(f"{rel}:{sec.line_start}", b)
+            if not bullets(sec.text):
+                prose = _first_rule(sec.text)
+                if prose:
+                    add(f"{rel}:{sec.line_start}", prose)
+
+    # Inline findings buried in long journal bullets (xeno-style).
+    if progress_text:
+        for i, raw in enumerate(progress_text.split("\n"), start=1):
+            line = raw.strip()
+            if not line.startswith(("-", "*")):
+                continue
+            body = line[1:].strip()
+            if KNOWN_BULLET.match(body):
+                continue  # already taken above
+            for found in INLINE_FINDING.finditer(body):
+                add(f"PROGRESS.md:{i}", found.group(0))
+
+    return "\n".join(lines[:8])
 
 
 def _focus_section(index: SpineIndex, focus: str) -> str:
@@ -793,6 +949,10 @@ def _warnings_section(index: SpineIndex) -> str:
         if since and int(since) >= DRIFT_AFTER_COMMITS:
             lines.append(f"- `{rel}` status \"{clip(status, 70)}\" unchanged for {since} commits (since {last[1]}): "
                          "check whether it's still true")
+        # Stronger: unsettled status but linked plan/progress claims the packet range is done.
+        drift = _adr_plan_completion_drift(index, rel, status)
+        if drift:
+            lines.append(drift)
     large = sorted((d for d in index.docs() if doc_tokens(d) > OVERSIZED_TOKENS), key=lambda d: -d["chars"])
     if large:
         lines.append("- too large to read whole, use recall/get_section: "
