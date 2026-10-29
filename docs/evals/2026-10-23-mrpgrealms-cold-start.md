@@ -47,3 +47,6 @@ honest next measurement.
   (citadel/keep). Only stale *labels* are detected so far.
 - Exact conventions and numbers (worktree path pattern, V0 commands, numeric gates) are hard to
   find, even with search.
+
+## Follow-up (2026-10-29)
+Addressed in PR #5 / Jules: ADR decision+reason/limitation in brief; shipped next-items flagged against merges/commits; conventions/gates (V0, numerics) preserved in clip_rule/verify. Known-bug why-unfixed narratives remain open.
