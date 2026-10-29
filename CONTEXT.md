@@ -30,6 +30,7 @@
 
 ## Current plan
 
-S1 and S2 are built. Next is S3 per SPEC.md §8: proxy catalogue entry, launcher-registry
-resolution, AgentsProtocol ADR and BOOTSTRAP step. Grader-reported brief gaps are open
-(docs/evals/): ADR one-liners with their reasons, stale "next" items, and exact conventions and gates.
+S1–S3 built (proxy `user.catalogue.json`, default `~/.spine` + launcher-registry resolution,
+AgentsProtocol ADR-0005 + BOOTSTRAP). Deferred: opt-in `PROGRESS.md` render from `history/`.
+Grader-reported brief gaps remain open (docs/evals/): ADR one-liners with their reasons,
+stale "next" items, and exact conventions and gates.

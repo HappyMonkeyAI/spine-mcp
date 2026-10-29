@@ -12,8 +12,9 @@ uncommitted for you to commit with the work. The index is a self-ignoring cache 
 
 ## Status
 
-**Spine: slices S1 (read) and S2 (write) built. Spine Design: slices D1–D4 built.** S3 (proxy catalogue, registry resolution,
-protocol ADR) is next.
+**Spine: slices S1–S3 built. Spine Design: slices D1–D4 built.** S3: DynamicMCPProxy
+`user.catalogue.json` entries, default launcher/`~/.spine` registry resolution, AgentsProtocol
+ADR-0005 + BOOTSTRAP. Opt-in `PROGRESS.md` render-from-history remains deferred.
 
 Measured on MRPGRealms (2026-10-23): brief ~2.4k tokens vs ~10k for protocol
 grounding (and a 55k-token `PROGRESS.md` no agent can read whole); cold build ~1.9 s.
@@ -40,8 +41,10 @@ Details: [xeno-gate-tactical](docs/evals/2026-10-23-xeno-gate-tactical-cold-star
 | `record_memory(agent, kind, title, body, project, paths?, tags?, update_of?, force_new?)` | insight / decision → own file; lesson → section of `patterns_and_lessons.md`. Refuses near-duplicates and returns them as `update_of` candidates |
 | `distill(project, since?, limit?, done_through?)` | Undistilled journal + checkpoints (oldest first) and current memories; `done_through` moves the git-tracked marker |
 
-`project` is a path, a launcher-registry name (with `SPINE_REGISTRY=/path/to/registry.json`),
-or (CLI only) omitted for the working directory. `agent` is who is writing:
+`project` is a path, a launcher-registry name, or (CLI only) omitted for the working
+directory. Set `SPINE_REGISTRY` to pin a registry file; when unset, Spine tries
+`~/.spine/registry.json` then `~/happymonkey/launcher-project-registry/registry.json`.
+`agent` is who is writing:
 `claude-code`, `codex`, `grok`, `hermes`, ... Every write is secret-scrubbed. Set
 `SPINE_READONLY=1` on a host to refuse all writes.
 
@@ -164,17 +167,19 @@ Note: Cursor's Agents Window may require opening the editor Agent panel for `ses
 
 spine-mcp is private, so put these in the proxy's gitignored `user.catalogue.json`, not its public
 `catalogue.json`. A handshake for UI work then activates `spine-design` by itself, and tools
-appear as `spine_*` / `spine-design_*`.
+appear as `spine_*` / `spine-design_*`. On this Windows host the overlay lives at
+`~/happymonkey/DynamicMCPProxy/user.catalogue.json` (paths below match that machine).
 
 ```json
 {
   "name": "spine",
   "description": "Warm-start project context for any agent: session brief, spine search, checkpoints and deduplicated memories over Agents Protocol docs",
-  "command": "uv --project /home/stephen/projects/spine-mcp run spine-mcp",
+  "command": "C:/Users/steph/.local/bin/uv.exe --project C:/Users/steph/Documents/development/spine-mcp run spine-mcp",
   "tags": ["context", "memory", "docs", "agents", "local"],
   "tech_stack": ["python", "mcp", "sqlite"],
   "runtime": "stdio",
-  "env_vars": ["SPINE_REGISTRY", "SPINE_READONLY"]
+  "env_vars": ["SPINE_REGISTRY", "SPINE_READONLY"],
+  "estimated_tools": 8
 }
 ```
 
@@ -182,11 +187,12 @@ appear as `spine_*` / `spine-design_*`.
 {
   "name": "spine-design",
   "description": "Visual memory and inventory for a project's running UI: design brief, captures and diffs, tokens, components, DESIGN.md drift and contrast, baselines, HTML Design Advisor hand-off",
-  "command": "uv --project /home/stephen/projects/spine-mcp run spine-design-mcp",
+  "command": "C:/Users/steph/.local/bin/uv.exe --project C:/Users/steph/Documents/development/spine-mcp --extra playwright run spine-design-mcp",
   "tags": ["design", "ui", "css", "tokens", "screenshots", "visual", "frontend", "accessibility", "local"],
   "tech_stack": ["react", "vue", "svelte", "html", "css", "typescript", "javascript", "electron"],
   "runtime": "stdio",
-  "env_vars": ["SPINE_BROWSEROS_URL", "SPINE_DESIGN_ADAPTER", "SPINE_PLAYWRIGHT_CHANNEL"]
+  "env_vars": ["SPINE_BROWSEROS_URL", "SPINE_DESIGN_ADAPTER", "SPINE_PLAYWRIGHT_CHANNEL", "SPINE_REGISTRY"],
+  "estimated_tools": 12
 }
 ```
 

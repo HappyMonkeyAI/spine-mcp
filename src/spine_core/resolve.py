@@ -39,31 +39,55 @@ def _key(value: object) -> str:
     return re.sub(r"[^a-z0-9]", "", str(value).lower())
 
 
+def _default_registry_paths() -> list[Path]:
+    """Well-known registry locations when SPINE_REGISTRY is unset (S3).
+
+    Order: operator Spine overlay, then launcher-project-registry checkout.
+    """
+    home = Path.home()
+    return [
+        home / ".spine" / "registry.json",
+        home / "happymonkey" / "launcher-project-registry" / "registry.json",
+    ]
+
+
+def _registry_files() -> list[Path]:
+    """Registry files to search: SPINE_REGISTRY first, then defaults that exist."""
+    files: list[Path] = []
+    explicit = os.environ.get("SPINE_REGISTRY")
+    if explicit:
+        files.append(Path(explicit).expanduser())
+    else:
+        files.extend(p for p in _default_registry_paths() if p.is_file())
+    return files
+
+
 def _lookup_registry(name: str) -> Path | None:
     """Look a project name up in launcher-project-registry's registry.json, if configured.
 
     The registry's shape (launcher ADR 0001, registry_ops.py) is
     {"projects": [{"slug", "name", "path", "catalogue_name", ...}]}; a project is
     found by any of those names, compared loosely.
+
+    When ``SPINE_REGISTRY`` is unset, falls back to ``~/.spine/registry.json`` then
+    ``~/happymonkey/launcher-project-registry/registry.json`` if present.
     """
-    registry = os.environ.get("SPINE_REGISTRY")
-    if not registry:
-        return None
-    try:
-        data = json.loads(Path(registry).expanduser().read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
-        return None
-    projects = data.get("projects", data) if isinstance(data, dict) else data
-    entries = projects.values() if isinstance(projects, dict) else projects
     wanted = _key(name)
-    for entry in entries:
-        if not isinstance(entry, dict):
+    for registry in _registry_files():
+        try:
+            data = json.loads(registry.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
             continue
-        names = {_key(entry.get(k, "")) for k in ("name", "id", "slug", "catalogue_name")} - {""}
-        if wanted in names:
-            path = entry.get("path") or entry.get("location")
-            if path and Path(path).expanduser().is_dir():
-                return Path(path).expanduser()
+        projects = data.get("projects", data) if isinstance(data, dict) else data
+        entries = projects.values() if isinstance(projects, dict) else projects
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            names = {_key(entry.get(k, "")) for k in ("name", "id", "slug", "catalogue_name")} - {""}
+            if wanted in names:
+                path = entry.get("path") or entry.get("location")
+                if path and Path(path).expanduser().is_dir():
+                    return Path(path).expanduser()
     return None
 
 
