@@ -360,6 +360,89 @@ def distill(
         }
 
 
+# -- Opt-in PROGRESS.md render from history/ (S3 deferred piece) --
+
+
+def _checkpoint_summary(body: str) -> str:
+    """Prefer the ## Summary section; else the first prose line."""
+    _, secs = sections(body if body.lstrip().startswith("#") else f"# checkpoint\n\n{body}")
+    for sec in secs:
+        if sec.heading.lower() == "summary":
+            text = _body(sec.text).strip()
+            if text:
+                return text
+    return next((ln.strip() for ln in body.split("\n") if ln.strip() and not ln.startswith("#")), "")
+
+def _checkpoint_title(stem: str) -> str:
+    """`2026-10-29T1451Z-crown-review` → `crown review`."""
+    match = re.match(r"^\d{4}-\d{2}-\d{2}T\d{4}Z-(.+?)(?:-\d+)?$", stem)
+    slug = match.group(1) if match else stem
+    return slug.replace("-", " ")
+
+
+def render_progress(
+    project: str | None,
+    *,
+    write: bool = False,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Build a human journal from `.agent/memories/history/` checkpoints.
+
+    Opt-in write: requires ``write=True`` or ``SPINE_RENDER_PROGRESS`` truthy.
+    Dry-run (default) returns markdown without touching the tree. When writing,
+    replaces root ``PROGRESS.md`` (secret-scrubbed); Spine still never commits.
+    """
+    env_on = os.environ.get("SPINE_RENDER_PROGRESS", "").lower() in {"1", "true", "yes"}
+    should_write = bool(write or env_on)
+    if should_write:
+        _check_writable()
+    root = resolve_project(project)
+    history = root / MEMORIES / "history"
+    files = sorted(history.glob("*.md"), reverse=True) if history.is_dir() else []
+    if limit > 0:
+        files = files[:limit]
+
+    lines = [
+        "# Progress",
+        "",
+        f"_Rendered from `{MEMORIES}/history/` by Spine "
+        f"({_now().strftime('%Y-%m-%d')}). Prefer checkpoints over hand-editing "
+        "this file when Spine is in use._",
+        "",
+    ]
+    if not files:
+        lines.extend(["_No checkpoints yet._", ""])
+    for path in files:
+        meta, body, _ = split_frontmatter(path.read_text(encoding="utf-8"))
+        created = str(meta.get("created") or path.stem)[:10]
+        agent = str(meta.get("agent") or "?")
+        branch = str(meta.get("branch") or "?")
+        sha = str(meta.get("sha") or "?")
+        lines.append(f"## {created} — {_checkpoint_title(path.stem)}")
+        lines.append("")
+        lines.append(f"_{agent} on `{branch}` @ {sha}_")
+        lines.append("")
+        summary = _checkpoint_summary(body)
+        if summary:
+            lines.append(summary)
+            lines.append("")
+
+    text = "\n".join(lines).rstrip() + "\n"
+    (text,), redactions = _scrubbed(text)
+    result: dict[str, Any] = {
+        "markdown": text,
+        "checkpoints": len(files),
+        "redactions": redactions,
+        "written": None,
+        "dry_run": not should_write,
+    }
+    if should_write:
+        _atomic_write(root / "PROGRESS.md", text)
+        result["written"] = "PROGRESS.md"
+        result["note"] = "uncommitted: review PROGRESS.md before committing"
+    return result
+
+
 # -- Stop-hook nudge (Claude Code; other agents use the AGENTS.md snippet) --
 
 

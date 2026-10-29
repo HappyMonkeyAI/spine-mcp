@@ -237,3 +237,27 @@ def test_cli_cursor_hook(project: Path, monkeypatch: pytest.MonkeyPatch, capsys:
     assert cli.main(["--project", "/nonexistent/path/for/spine/test", "brief", "--cursor-hook"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out == {}
+
+
+def test_render_progress_dry_run_and_write(project: Path) -> None:
+    writes.checkpoint(str(project), "cursor", "Ship render-progress", done=["impl"], next=["docs"])
+    dry = writes.render_progress(str(project))
+    assert dry["dry_run"] is True and dry["written"] is None and dry["checkpoints"] == 1
+    assert "# Progress" in dry["markdown"] and "Ship render-progress" in dry["markdown"]
+    assert not (project / "PROGRESS.md").exists() or "Ship render-progress" not in _read(project, "PROGRESS.md")
+
+    written = writes.render_progress(str(project), write=True)
+    assert written["dry_run"] is False and written["written"] == "PROGRESS.md"
+    text = _read(project, "PROGRESS.md")
+    assert "Ship render-progress" in text and "Rendered from" in text
+
+
+def test_render_progress_env_write_and_readonly(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    writes.checkpoint(str(project), "cursor", "Env gated write")
+    monkeypatch.setenv("SPINE_RENDER_PROGRESS", "1")
+    out = writes.render_progress(str(project))
+    assert out["written"] == "PROGRESS.md" and "Env gated write" in _read(project, "PROGRESS.md")
+
+    monkeypatch.setenv("SPINE_READONLY", "1")
+    with pytest.raises(writes.SpineWriteError, match="read-only"):
+        writes.render_progress(str(project), write=True)

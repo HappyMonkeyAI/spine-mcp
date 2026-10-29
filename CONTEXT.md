@@ -31,6 +31,6 @@
 ## Current plan
 
 S1–S3 built (proxy `user.catalogue.json`, default `~/.spine` + launcher-registry resolution,
-AgentsProtocol ADR-0005 + BOOTSTRAP). Deferred: opt-in `PROGRESS.md` render from `history/`.
-Grader-reported brief gaps remain open (docs/evals/): ADR one-liners with their reasons,
-stale "next" items, and exact conventions and gates.
+AgentsProtocol ADR-0005 + BOOTSTRAP). Opt-in `PROGRESS.md` render from `history/` via
+`render_progress` / `spine render-progress` (`--write` or `SPINE_RENDER_PROGRESS=1`).
+Brief grader gaps (docs/evals/) in flight via Jules.

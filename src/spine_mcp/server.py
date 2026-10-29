@@ -143,6 +143,18 @@ async def distill(
     return writes.distill(_project(project), since=since, limit=limit, done_through=done_through)
 
 
+@mcp.tool()
+async def render_progress(
+    project: str | None = None,
+    write: bool = False,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Opt-in human journal: build PROGRESS.md from `.agent/memories/history/` checkpoints.
+    Dry-run by default (returns markdown). Set write=true or SPINE_RENDER_PROGRESS=1 to write
+    the file; Spine never commits it."""
+    return writes.render_progress(_project(project), write=write, limit=limit)
+
+
 @mcp.resource("spine://brief")
 def brief_resource() -> str:
     """Session brief for SPINE_PROJECT (set it in the client's server config)."""
