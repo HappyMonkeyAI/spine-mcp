@@ -41,3 +41,8 @@ Tool feedback from Run B:
 - `section --grep` needs a heading (it can't grep a whole file)
 - no path filter on recall (e.g. `apps/xeno-tactical`)
 - ADR filenames aren't in the brief
+
+
+## Follow-up (2026-10-29)
+Addressed in PR #5 / Jules: ADR lines now include decision reason/limitation; verify/convention clipping improved. Doc-drift status vs plan and app-level operating notes remain open.
+
