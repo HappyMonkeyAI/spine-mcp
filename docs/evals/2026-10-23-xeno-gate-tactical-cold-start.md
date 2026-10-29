@@ -46,5 +46,7 @@ Tool feedback from Run B:
 ## Follow-up (2026-10-29)
 Addressed in PR #5 / Jules: ADR lines now include decision reason/limitation; verify/convention clipping improved.
 
-Remaining gaps closed on `feat/brief-remaining-eval-gaps`: unsettled ADR status vs linked plan that claims complete; app-level verify steps from `apps/*/docs`; known-issues section from Known: / Known limits / inline findings.
+Remaining gaps closed in PR #6: unsettled ADR status vs linked plan that claims complete; app-level verify steps from `apps/*/docs`; known-issues section from Known: / Known limits / inline findings.
+
+Honest next score: [2026-10-29 held-out cold-start](2026-10-29-held-out-cold-start.md) (fresh questions, different project).
 

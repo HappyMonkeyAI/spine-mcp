@@ -51,4 +51,6 @@ honest next measurement.
 ## Follow-up (2026-10-29)
 Addressed in PR #5 / Jules: ADR decision+reason/limitation in brief; shipped next-items flagged against merges/commits; conventions/gates (V0, numerics) preserved in clip_rule/verify.
 
-Remaining gap closed on `feat/brief-remaining-eval-gaps`: brief `known issues` section surfaces PROGRESS `Known:` / `Found, not caused here` / `Observed (not changed)` bullets (newest first) with the why-unfixed phrasing.
+Remaining gap closed in PR #6: brief `known issues` section surfaces PROGRESS `Known:` / `Found, not caused here` / `Observed (not changed)` bullets (newest first) with the why-unfixed phrasing.
+
+Honest next score: [2026-10-29 held-out cold-start](2026-10-29-held-out-cold-start.md) (fresh questions, different project).
