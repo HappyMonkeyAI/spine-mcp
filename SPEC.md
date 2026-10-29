@@ -270,7 +270,8 @@ Acceptance (all covered by `tests/test_writes.py`):
 
 **S3 — integration**
 DynamicMCPProxy catalogue entry (`spine`), launcher-registry name resolution,
-opt-in PROGRESS.md rendering from `history/`, AgentsProtocol ADR + BOOTSTRAP step.
+opt-in PROGRESS.md rendering from `history/` (`render_progress` / `spine render-progress`),
+AgentsProtocol ADR + BOOTSTRAP step.
 
 **Design collector:** specified in [docs/specs/design-mcp.md](docs/specs/design-mcp.md) (Spine Design, slices D1–D4).
 
