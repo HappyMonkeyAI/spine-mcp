@@ -28,3 +28,6 @@ Thumbs.db
 htmlcov/
 .coverage
 coverage.xml
+
+# local protocol overlay (ADR-0003)
+MCP.local.md
