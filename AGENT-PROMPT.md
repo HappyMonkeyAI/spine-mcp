@@ -33,6 +33,10 @@ Before finishing project work:
   summarizing what was done, verification, next steps, and blockers.
 - Use record_memory only for durable decisions, lessons, or insights that
   future agents cannot readily recover from code or Git history.
+- Do not call render_progress with write=true unless the owner asked or
+  PROGRESS.md is already Spine-rendered. Prefer checkpoint/record_memory.
+  Hand-authored PROGRESS.md is preserved (PROGRESS.spine.md); force overwrites
+  only after PROGRESS.md.bak.
 - Spine writes project memory files but does not commit them. Report any
   uncommitted checkpoint or memory files.
 

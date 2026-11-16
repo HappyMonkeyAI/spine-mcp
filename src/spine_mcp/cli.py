@@ -74,9 +74,14 @@ def main(argv: list[str] | None = None) -> int:
 
     prog = sub.add_parser(
         "render-progress",
-        help="opt-in: render PROGRESS.md from .agent/memories/history/ (dry-run unless --write or SPINE_RENDER_PROGRESS)",
+        help="opt-in: render PROGRESS from history/ (dry-run unless --write or SPINE_RENDER_PROGRESS)",
     )
-    prog.add_argument("--write", action="store_true", help="write PROGRESS.md (also enabled by SPINE_RENDER_PROGRESS=1)")
+    prog.add_argument("--write", action="store_true", help="write PROGRESS.md or PROGRESS.spine.md (also SPINE_RENDER_PROGRESS=1)")
+    prog.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite hand-authored PROGRESS.md after PROGRESS.md.bak (default: write PROGRESS.spine.md)",
+    )
     prog.add_argument("--limit", type=int, default=50, help="newest N checkpoints (default 50)")
 
     args = parser.parse_args(argv)
@@ -133,7 +138,11 @@ def main(argv: list[str] | None = None) -> int:
             if reason:
                 _json({"decision": "block", "reason": reason})
         elif args.command == "render-progress":
-            _json(writes.render_progress(args.project, write=args.write, limit=args.limit))
+            _json(
+                writes.render_progress(
+                    args.project, write=args.write, limit=args.limit, force=args.force
+                )
+            )
     except Exception as exc:
         # A hook must never block session start.
         if getattr(args, "cursor_hook", False):

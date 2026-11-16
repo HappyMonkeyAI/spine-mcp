@@ -240,6 +240,7 @@ def test_cli_cursor_hook(project: Path, monkeypatch: pytest.MonkeyPatch, capsys:
 
 
 def test_render_progress_dry_run_and_write(project: Path) -> None:
+    (project / "PROGRESS.md").unlink(missing_ok=True)
     writes.checkpoint(str(project), "cursor", "Ship render-progress", done=["impl"], next=["docs"])
     dry = writes.render_progress(str(project))
     assert dry["dry_run"] is True and dry["written"] is None and dry["checkpoints"] == 1
@@ -251,8 +252,39 @@ def test_render_progress_dry_run_and_write(project: Path) -> None:
     text = _read(project, "PROGRESS.md")
     assert "Ship render-progress" in text and "Rendered from" in text
 
+    again = writes.render_progress(str(project), write=True)
+    assert again["written"] == "PROGRESS.md" and again["backup"] == "PROGRESS.md.bak"
+    assert "Ship render-progress" in _read(project, "PROGRESS.md.bak")
+
+
+def test_render_progress_preserves_hand_authored_progress(project: Path) -> None:
+    (project / "PROGRESS.md").write_text(
+        "# Progress\n\n## Next slice\n\nLong hand narrative that must survive.\n",
+        encoding="utf-8",
+    )
+    writes.checkpoint(str(project), "cursor", "Do not clobber hand progress")
+    out = writes.render_progress(str(project), write=True)
+    assert out["written"] == "PROGRESS.spine.md"
+    assert out["preserved"] == "PROGRESS.md"
+    assert out["hand_authored_progress"] is True
+    assert "Long hand narrative that must survive." in _read(project, "PROGRESS.md")
+    assert "Do not clobber hand progress" in _read(project, "PROGRESS.spine.md")
+    assert "PROGRESS.spine.md" in _read(project, "PROGRESS.spine.md")
+
+
+def test_render_progress_force_overwrites_after_backup(project: Path) -> None:
+    (project / "PROGRESS.md").write_text("# Progress\n\nHand owned body.\n", encoding="utf-8")
+    writes.checkpoint(str(project), "cursor", "Forced render")
+    out = writes.render_progress(str(project), write=True, force=True)
+    assert out["written"] == "PROGRESS.md"
+    assert out["backup"] == "PROGRESS.md.bak"
+    assert "Hand owned body." in _read(project, "PROGRESS.md.bak")
+    assert "Forced render" in _read(project, "PROGRESS.md")
+    assert "Rendered from" in _read(project, "PROGRESS.md")
+
 
 def test_render_progress_env_write_and_readonly(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (project / "PROGRESS.md").unlink(missing_ok=True)
     writes.checkpoint(str(project), "cursor", "Env gated write")
     monkeypatch.setenv("SPINE_RENDER_PROGRESS", "1")
     out = writes.render_progress(str(project))

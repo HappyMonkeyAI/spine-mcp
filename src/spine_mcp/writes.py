@@ -362,6 +362,15 @@ def distill(
 
 # -- Opt-in PROGRESS.md render from history/ (S3 deferred piece) --
 
+SPINE_PROGRESS_MARKER = "Rendered from `.agent/memories/history/` by Spine"
+HAND_PROGRESS_SIDE_FILE = "PROGRESS.spine.md"
+PROGRESS_BACKUP = "PROGRESS.md.bak"
+
+
+def _is_spine_rendered_progress(text: str) -> bool:
+    """True when PROGRESS.md was previously written by Spine (safe to replace)."""
+    return "Rendered from" in text and "by Spine" in text
+
 
 def _checkpoint_summary(body: str) -> str:
     """Prefer the ## Summary section; else the first prose line."""
@@ -385,12 +394,18 @@ def render_progress(
     *,
     write: bool = False,
     limit: int = 50,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Build a human journal from `.agent/memories/history/` checkpoints.
 
     Opt-in write: requires ``write=True`` or ``SPINE_RENDER_PROGRESS`` truthy.
-    Dry-run (default) returns markdown without touching the tree. When writing,
-    replaces root ``PROGRESS.md`` (secret-scrubbed); Spine still never commits.
+    Dry-run (default) returns markdown without touching the tree. When writing:
+
+    - Missing or Spine-rendered ``PROGRESS.md`` → replace it (after ``PROGRESS.md.bak``).
+    - Hand-authored ``PROGRESS.md`` → write ``PROGRESS.spine.md`` instead (preserve hand file)
+      unless ``force=True`` (then backup + overwrite ``PROGRESS.md``).
+
+    Spine still never commits.
     """
     env_on = os.environ.get("SPINE_RENDER_PROGRESS", "").lower() in {"1", "true", "yes"}
     should_write = bool(write or env_on)
@@ -402,12 +417,28 @@ def render_progress(
     if limit > 0:
         files = files[:limit]
 
+    progress_path = root / "PROGRESS.md"
+    hand_authored = False
+    existing_text = ""
+    if progress_path.is_file():
+        existing_text = progress_path.read_text(encoding="utf-8", errors="replace")
+        hand_authored = not _is_spine_rendered_progress(existing_text)
+
+    side_file = hand_authored and not force
+    header_note = (
+        f"_Rendered from `{MEMORIES}/history/` by Spine "
+        f"({_now().strftime('%Y-%m-%d')}). Prefer checkpoints over hand-editing "
+        "this file when Spine is in use._"
+    )
+    if side_file:
+        header_note += (
+            f" Hand-authored `PROGRESS.md` was preserved; this file is `{HAND_PROGRESS_SIDE_FILE}`."
+        )
+
     lines = [
         "# Progress",
         "",
-        f"_Rendered from `{MEMORIES}/history/` by Spine "
-        f"({_now().strftime('%Y-%m-%d')}). Prefer checkpoints over hand-editing "
-        "this file when Spine is in use._",
+        header_note,
         "",
     ]
     if not files:
@@ -435,11 +466,26 @@ def render_progress(
         "redactions": redactions,
         "written": None,
         "dry_run": not should_write,
+        "preserved": None,
+        "backup": None,
+        "hand_authored_progress": hand_authored,
     }
     if should_write:
-        _atomic_write(root / "PROGRESS.md", text)
-        result["written"] = "PROGRESS.md"
-        result["note"] = "uncommitted: review PROGRESS.md before committing"
+        target = root / HAND_PROGRESS_SIDE_FILE if side_file else progress_path
+        if progress_path.is_file() and (not side_file):
+            bak = root / PROGRESS_BACKUP
+            bak.write_text(existing_text, encoding="utf-8")
+            result["backup"] = PROGRESS_BACKUP
+        _atomic_write(target, text)
+        result["written"] = target.name
+        if side_file:
+            result["preserved"] = "PROGRESS.md"
+            result["note"] = (
+                f"uncommitted: wrote {HAND_PROGRESS_SIDE_FILE}; "
+                "hand-authored PROGRESS.md preserved (pass force=true to overwrite after .bak)"
+            )
+        else:
+            result["note"] = f"uncommitted: review {target.name} before committing"
     return result
 
 

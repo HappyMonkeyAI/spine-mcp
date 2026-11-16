@@ -148,11 +148,14 @@ async def render_progress(
     project: str | None = None,
     write: bool = False,
     limit: int = 50,
+    force: bool = False,
 ) -> dict[str, Any]:
-    """Opt-in human journal: build PROGRESS.md from `.agent/memories/history/` checkpoints.
-    Dry-run by default (returns markdown). Set write=true or SPINE_RENDER_PROGRESS=1 to write
-    the file; Spine never commits it."""
-    return writes.render_progress(_project(project), write=write, limit=limit)
+    """Opt-in journal from `.agent/memories/history/` checkpoints. Dry-run by default.
+    write=true or SPINE_RENDER_PROGRESS=1 writes the file. Hand-authored PROGRESS.md is
+    preserved (writes PROGRESS.spine.md) unless force=true (then PROGRESS.md.bak + replace).
+    Never call write=true unless the owner asked or PROGRESS.md is already Spine-rendered.
+    Spine never commits."""
+    return writes.render_progress(_project(project), write=write, limit=limit, force=force)
 
 
 @mcp.resource("spine://brief")
