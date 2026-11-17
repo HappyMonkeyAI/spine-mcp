@@ -5,6 +5,11 @@ description = "Warm-start query layer over a project's Agents Protocol documenta
 license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [
+    { name = "Stephen Phillips" },
+    { name = "HappyMonkeyAI" },
+]
+urls = { Homepage = "https://github.com/HappyMonkeyAI/spine-mcp", Repository = "https://github.com/HappyMonkeyAI/spine-mcp" }
 dependencies = [
     "mcp>=1.0.0,<2",  # 2.x renamed FastMCP to MCPServer; siblings are still on 1.x
     "Pillow>=10",     # spine-design: image validation, webp, diffs, crops

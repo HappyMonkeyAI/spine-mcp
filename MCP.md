@@ -36,10 +36,10 @@
 | **Security / vulnerability audit** | `auditscan` / AuditScan | Hermes or `proxy_activate_server("auditscan")` | Trident **input**, not Owner V2/V3 substitute |
 | **Article / tutorial research** | `article_research` | Hermes or proxy activate | Planning / Deep Mode RECON |
 | **Structured choice / decision** | `kev` / `kev_157` / `kev-decision-mcp` | Hermes always-on when configured; else proxy | `kev_evaluate` / `kev_permute` / `kev_separate` — not free-form text |
-| **Library / API pattern RAG** | `neo4j_semantic_search` / `neo4j-semantic-search` | Hermes direct **or** proxy activate then `*_load` | Codex vault graph; backend often 192.168.5.232 Neo4j+Ollama |
+| **Library / API pattern RAG** | `neo4j_semantic_search` / `neo4j-semantic-search` | Hermes direct **or** proxy activate then `*_load` | Knowledge graph / vault search when mounted |
 | GitHub issues/PRs | `github` | Hermes or proxy | Prefer over raw `gh` when mounted |
 | Browser E2E | `playwright` | Hermes or proxy | Complements browseros |
-| Durable wiki notes | project `kb-vault` / basic-memory | path `~/projects/kb-vault` on .215 | Desktop canonical may still be .229 |
+| Durable wiki notes | project wiki / `kb-vault` / basic-memory | local or remote vault checkout | Prefer the canonical vault over inspection copies |
 
 ---
 
@@ -58,5 +58,4 @@
 ## Project notes
 
 - Project slug for Spine/launcher: `spine-mcp`
-- Absolute path: `/home/stephen/projects/spine-mcp`
-- Prefer absolute path if named resolution fails.
+- Prefer an absolute checkout path if named registry resolution fails.

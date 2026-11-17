@@ -372,8 +372,8 @@ Learned:
   - contrast failures (deduplicated across views, at their worst ratio)
 
   It doesn't call the Advisor: the agent passes them on, so the two servers stay independent.
-- **DynamicMCPProxy.** Both servers go in the proxy's gitignored `user.catalogue.json` overlay.
-  spine-mcp is private, so it stays out of the public catalogue. Tested live:
+- **DynamicMCPProxy.** Both servers can live in a local catalogue overlay (or the shared
+  catalogue once published). Tested live:
   - the catalogue lists both
   - a handshake for a UI-design task activated `spine-design` by itself
   - both mounted, and `spine_session_brief` / `spine-design_design_brief` answered through the proxy

@@ -1,8 +1,8 @@
 # Spine MCP — v1 Spec
 
 Status: **Draft for review** · 2026-10-23
-Home: `~/happymonkey/spine-mcp` (sibling of `agent-coordination-mcp`, `Resource-Sentinel-MCP`)
-Stack: Python 3.10+, `mcp.server.fastmcp.FastMCP`, `uv`, SQLite FTS5 — same as the siblings.
+Home: [github.com/HappyMonkeyAI/spine-mcp](https://github.com/HappyMonkeyAI/spine-mcp)
+Stack: Python 3.11+, `mcp.server.fastmcp.FastMCP`, `uv`, SQLite FTS5.
 
 ## 1. Problem
 

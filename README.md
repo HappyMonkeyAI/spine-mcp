@@ -167,16 +167,15 @@ Note: Cursor's Agents Window may require opening the editor Agent panel for `ses
 
 ## Dynamic MCP Proxy Entry
 
-spine-mcp is private, so put these in the proxy's gitignored `user.catalogue.json`, not its public
-`catalogue.json`. A handshake for UI work then activates `spine-design` by itself, and tools
-appear as `spine_*` / `spine-design_*`. On this Windows host the overlay lives at
-`~/happymonkey/DynamicMCPProxy/user.catalogue.json` (paths below match that machine).
+If you use Dynamic MCP Proxy (or a similar catalogue), add entries like these and point `command`
+at your checkout. A handshake for UI work can activate `spine-design` by itself; tools appear as
+`spine_*` / `spine-design_*`.
 
 ```json
 {
   "name": "spine",
   "description": "Warm-start project context for any agent: session brief, spine search, checkpoints and deduplicated memories over Agents Protocol docs",
-  "command": "C:/Users/steph/.local/bin/uv.exe --project C:/Users/steph/Documents/development/spine-mcp run spine-mcp",
+  "command": "uv --project /path/to/spine-mcp run spine-mcp",
   "tags": ["context", "memory", "docs", "agents", "local"],
   "tech_stack": ["python", "mcp", "sqlite"],
   "runtime": "stdio",
@@ -189,7 +188,7 @@ appear as `spine_*` / `spine-design_*`. On this Windows host the overlay lives a
 {
   "name": "spine-design",
   "description": "Visual memory and inventory for a project's running UI: design brief, captures and diffs, tokens, components, DESIGN.md drift and contrast, baselines, HTML Design Advisor hand-off",
-  "command": "C:/Users/steph/.local/bin/uv.exe --project C:/Users/steph/Documents/development/spine-mcp --extra playwright run spine-design-mcp",
+  "command": "uv --project /path/to/spine-mcp --extra playwright run spine-design-mcp",
   "tags": ["design", "ui", "css", "tokens", "screenshots", "visual", "frontend", "accessibility", "local"],
   "tech_stack": ["react", "vue", "svelte", "html", "css", "typescript", "javascript", "electron"],
   "runtime": "stdio",
@@ -258,4 +257,4 @@ Actions: `click`, `fill = [sel, value]`, `press = "Control+Shift+R"`, `wait_for`
 
 ## License
 
-MIT
+MIT — Copyright (c) 2026 Stephen Phillips and HappyMonkeyAI. See [LICENSE](LICENSE).
